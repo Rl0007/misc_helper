@@ -1,0 +1,6 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.3.14/schema.json",
+	"files": { "includes": ["misc_helper/public/js/**", "!misc_helper/public/js/alpine.min.js"] },
+	"formatter": { "indentStyle": "tab" },
+	"javascript": { "formatter": { "quoteStyle": "single" } }
+}

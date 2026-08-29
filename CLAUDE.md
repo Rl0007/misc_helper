@@ -1,0 +1,169 @@
+# misc_helper — app notes
+
+Personal day-to-day helper app. Modules: `Misc Helper`, `Travel` (stub), `Clipboard`.
+
+Feature specs live in `docs/`. The clipboard feature is specified in
+[`docs/clipboard-spec.md`](docs/clipboard-spec.md) — read it before changing anything under
+`misc_helper/clipboard/` or `misc_helper/www/clipboard/`.
+
+## Bench facts for this machine
+
+**Two benches run here.** This one (`develop`) serves web on **:8010** with socketio on
+**9012**; an unrelated bench occupies :8000. Testing a portal page on :8000 loads a page whose
+websocket points at a socketio it does not own — realtime silently never connects and looks
+like a code bug. Always use :8010.
+
+Site: `hobby.localhost` (keep `developer_mode: 1` — doctype changes are exported to disk
+through it).
+
+---
+
+# Framework gotchas — learned the hard way, with the why
+
+## Hooks
+
+**`web_include_css`, not `app_include_css`.** `app_include_css` injects into `desk.html` only;
+website/portal pages read `web_include_css`. There is no `build_include` hook in Frappe.
+It loads on *every* website page, so scope your selectors.
+
+## Rate limiting
+
+**`frappe.rate_limit` does not exist** on this version — import from `frappe.rate_limiter`.
+Migrate fails on the wrong one. Pass a **callable** as `limit` (`rate_limiter.py:145` resolves
+it per request) so the cap really comes from a Settings doctype instead of being frozen at
+import time.
+
+## Naming — `autoname: field:x`
+
+**Normalise in `before_naming`, never in `validate`.** `Document.insert` runs `set_new_name()`
+first, deriving `name` from the RAW field; then `_validate()` calls
+`base_document.py:1323 _sync_autoname_field()`, which does `self.set(fieldname, self.name)` —
+writing the raw value back over whatever `validate` just normalised. Rejection in `validate`
+still works; normalisation is silently discarded.
+
+## Long Text is bleach-sanitised behind your back
+
+`base_document._sanitize_content` (`base_document.py:1410`) filters any Long Text field whose
+value contains `<` or `>`. It entity-escapes `&` **and silently deletes `<script>` blocks
+outright** — so stored user text is corrupted and pasted code loses chunks.
+
+It short-circuits when the value has no angle bracket (`base_document.py:1399`), so `a & b`
+alone is untouched. Only angle-bracket-bearing text is hit, which means *code* is the victim.
+
+Escape hatch: `ignore_xss_filter = 1` on the field. **Consequence: storage is then raw, so
+render-time escaping becomes load-bearing** — Jinja `| e` and Alpine `x-text` are the only
+thing standing between a pasted payload and stored XSS. Pin the flag with a test that reads
+`frappe.get_meta(dt).get_field(f).ignore_xss_filter`; a future doctype edit can silently drop it.
+
+## Guest requests are sanitised before your function runs
+
+`is_whitelisted` (`frappe/__init__.py:648-654`) bleach-sanitises **every string in `form_dict`**
+when the caller is Guest, unless the method is marked `xss_safe`:
+
+```python
+if is_guest and method not in xss_safe_methods:
+    for key, value in form_dict.items():
+        if isinstance(value, str):
+            form_dict[key] = sanitize_html(value)
+```
+
+It entity-escapes `&` and silently DELETES tags — so guest-submitted text arrives corrupted and
+your function never sees what was sent. This is separate from, and upstream of, the
+`ignore_xss_filter` field flag; fixing only the field flag does nothing for guests.
+
+**It bites only guests**, so in-process tests and logged-in manual checks all pass while the
+real users get mangled text. `<b>bold</b>` survives bleach and is a false-negative canary —
+test with `<ok>` or `<script>`.
+
+Opt out per endpoint with `@frappe.whitelist(allow_guest=True, xss_safe=True)`
+(`frappe/__init__.py:581`). Do NOT blanket-apply it: set it only on endpoints that genuinely
+accept free text, and leave it off where arguments are re-derived through strict validation —
+that keeps a free extra layer. **`xss_safe=True` makes render-time escaping the only remaining
+XSS defence for that endpoint**, so pair it with a render-side test.
+
+Pin it with a test: an in-process test CANNOT catch a regression here, because it never reaches
+`is_whitelisted`. Assert `your.module.method in frappe.xss_safe_methods`, or drive real
+cookie-less HTTP.
+
+## Realtime init ordering on portal pages
+
+`frappe.realtime.on()` is guarded by `if (this.socket)` (`socketio_client.js:12`) and **silently
+does nothing** when the socket does not exist yet — no listener, no connection, no error. The
+website bundle builds the socket from its own `frappe.ready` handler
+(`website/js/website.js:684`), which runs AFTER `alpine:init`. So an Alpine component that
+subscribes in `init()` registers nothing and the feature quietly falls back to whatever polling
+you wrote, which masks the bug.
+
+Fix: call `frappe.realtime.init(window.socketio_port, true)` yourself before `on()`.
+`RealTimeClient.init()` short-circuits on `if (this.socket) return`, so it is order-independent
+and exactly one socket is built either way. `window.socketio_port` is set in `base.html:53`.
+
+Verify with `frappe.realtime.socket.connected` and
+`frappe.realtime.socket.listeners('<event>').length` — not by watching the UI update, which
+polling will do for you and hide the fault.
+
+## Page background in both themes
+
+Set `context.body_class` from `get_context` (`base.html:57` renders it) rather than styling
+`body` in your app CSS — a `web_include_css` file loads on EVERY portal page, so a `body` rule
+there repaints the whole site. Without this the page shows a white band below the app wrapper
+in dark mode.
+
+## Realtime for guests
+
+Guests **can** receive realtime on portal pages: every socket including Guest auto-joins the
+`website` room (`realtime/handlers.js:8`), and `socketio_client.js` ships in
+`frappe-web.bundle.js`. Use `frappe.realtime.publish_to_website(event, msg)`.
+
+`doc_subscribe` / `doctype_subscribe` will NOT work for guests — they call `has_permission`.
+
+**The `website` room broadcasts to every connected socket on the site**, so never put content
+in the payload. Publish a content-free "something changed" ping and have the client re-fetch
+through an endpoint that owns authorization. That stays correct when access control is added
+later.
+
+## Files
+
+- **Do not enable `allow_guests_to_upload_files`** to let guests upload — it is site-wide and
+  opens uploads for every doctype (`handler.py:135`). Write your own `allow_guest` endpoint
+  and create the `File` doc directly, owning your own size/type limits.
+- **`only_allow_system_managers_to_upload_public_files`** breaks guest public uploads if turned
+  on: `File.enforce_public_file_restrictions` calls `frappe.only_for("System Manager")`, and
+  `ignore_permissions=True` does NOT bypass it.
+- **`File.file_name` is not the on-disk filename once bytes are deduped.** `save_file` dedupes
+  by `content_hash`, so the second doc keeps its own generated hash in `file_name` while
+  `file_url` points at the first-uploaded blob. Only `file_url` resolves to a real path.
+- Identical bytes share one blob; `_delete_file_on_disk` refcounts by `content_hash` and only
+  unlinks when the last referencing File doc goes. Separate File docs per attachment are safe.
+- `delete_doc` already cascades attached Files (`model/delete_doc.py:189`) — an `on_trash` that
+  deletes them is redundant.
+
+## Committing from a read path
+
+Never call `frappe.db.commit()` in a GET handler — it commits the caller's entire ambient
+transaction. Set `frappe.flags.commit = True` instead; the framework commits once at end of
+request (`app.py:433`).
+
+## Tailwind v4 on a Frappe portal page
+
+- Frappe **already ships the frappe-ui/espresso token layer** on every website page
+  (`frappe/public/css/espresso/colors.css` via `website.bundle.scss`) — ~1125 CSS variables
+  with a `[data-theme="dark"]` block. Never declare a color; map onto these and dark mode is free.
+- The bundled `scss/common/utilities.scss` is only a ~55-class subset (no spacing or text
+  sizes), so a real Tailwind build is still needed.
+- **Use `@theme inline`.** Plain `@theme` freezes the token's value at `:root`, breaking the
+  dark-mode swap. `inline` substitutes the `var()` into the utility itself.
+- **Import utilities UNLAYERED.** Frappe's bundle is unlayered, and unlayered rules beat any
+  `@layer` regardless of source order — put utilities in `@layer utilities` and Frappe's
+  `.inline-flex` silently overrides your `md:hidden`.
+- **Do not import preflight** — it strips Frappe's navbar and footer. Without it, Bootstrap's
+  list padding survives, so add `list-none pl-0` on `<ul>`s.
+
+## Testing
+
+- **`IntegrationTestCase.change_settings` has no `try/finally`** — an assertion failing inside
+  its block leaks the changed setting and commits it to the site. Write a context manager that
+  always restores.
+- A suite written *after* the code proves nothing by being green. Mutate the implementation one
+  line at a time and confirm each mutation turns a specific test red; a mutation that stays
+  green means the test is blind, or the "bug" it guards was never real.

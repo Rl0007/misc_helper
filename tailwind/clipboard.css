@@ -1,0 +1,58 @@
+/* Clipboard portal styles.
+ *
+ * Preflight is deliberately NOT imported: these pages render inside Frappe's website
+ * bundle (Bootstrap + espresso components), and Tailwind's reset would strip the
+ * surrounding navbar/footer styling.
+ *
+ * The utilities are imported unlayered for the same reason. Frappe's bundle is unlayered,
+ * and unlayered rules beat any @layer regardless of source order, so `@layer utilities`
+ * would silently lose every collision with frappe's own .inline-flex / .hidden helpers.
+ *
+ * Every color below maps onto a frappe-ui (espresso) token that the website bundle
+ * already ships on every portal page, so dark mode follows [data-theme="dark"] for
+ * free. `@theme inline` is required for that: it substitutes the var() reference into
+ * the utility instead of freezing a resolved value at :root. */
+
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css";
+
+@source "../misc_helper/www/clipboard";
+@source "../misc_helper/templates/macros";
+
+@theme inline {
+	--color-surface-base: var(--surface-base);
+	--color-surface-card: var(--surface-gray-1);
+	--color-surface-subtle: var(--surface-gray-2);
+	--color-surface-hover: var(--surface-gray-3);
+	--color-surface-elevated: var(--surface-elevation-1);
+	--color-surface-solid: var(--surface-gray-7);
+	--color-surface-solid-hover: var(--surface-gray-8);
+	--color-surface-danger: var(--surface-red-1);
+	--color-surface-danger-hover: var(--surface-red-2);
+	--color-surface-success: var(--surface-green-1);
+	--color-surface-warning: var(--surface-amber-1);
+
+	--color-ink-base: var(--ink-gray-8);
+	--color-ink-strong: var(--ink-gray-9);
+	--color-ink-secondary: var(--ink-gray-6);
+	--color-ink-muted: var(--ink-gray-5);
+	--color-ink-subtle: var(--ink-gray-4);
+	--color-ink-inverse: var(--ink-base);
+	--color-ink-link: var(--ink-blue-link);
+	--color-ink-danger: var(--ink-red-8);
+	--color-ink-success: var(--ink-green-8);
+	--color-ink-warning: var(--ink-amber-8);
+
+	--color-outline-base: var(--outline-base);
+	--color-outline-subtle: var(--outline-gray-1);
+	--color-outline-strong: var(--outline-gray-3);
+	--color-outline-focus: var(--outline-gray-4);
+	--color-outline-danger: var(--outline-red-2);
+	--color-outline-success: var(--outline-green-2);
+	--color-outline-warning: var(--outline-amber-2);
+}
+
+/* Alpine hides x-cloak elements until it boots; without this the raw markup flashes. */
+[x-cloak] {
+	display: none !important;
+}

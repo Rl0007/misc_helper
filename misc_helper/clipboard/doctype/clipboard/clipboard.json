@@ -1,0 +1,56 @@
+{
+ "actions": [],
+ "autoname": "field:room_name",
+ "creation": "2026-08-29 11:33:36.241977",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "room_name",
+  "expires_on",
+  "last_activity"
+ ],
+ "fields": [
+  {
+   "fieldname": "room_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Room Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "expires_on",
+   "fieldtype": "Datetime",
+   "label": "Expires On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_activity",
+   "fieldtype": "Datetime",
+   "label": "Last Activity",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-08-29 11:34:04.025914",
+ "modified_by": "Administrator",
+ "module": "Clipboard",
+ "name": "Clipboard",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "room_name"
+}

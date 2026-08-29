@@ -1,0 +1,75 @@
+{
+ "actions": [],
+ "creation": "2026-08-29 11:33:37.400676",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "clipboard",
+  "item_type",
+  "content",
+  "file_url",
+  "file_name",
+  "file_size"
+ ],
+ "fields": [
+  {
+   "fieldname": "clipboard",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Clipboard",
+   "options": "Clipboard",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "item_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Item Type",
+   "options": "Text\nImage",
+   "reqd": 1
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Long Text",
+   "ignore_xss_filter": 1,
+   "label": "Content"
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "label": "File URL"
+  },
+  {
+   "fieldname": "file_name",
+   "fieldtype": "Data",
+   "label": "File Name"
+  },
+  {
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "File Size"
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-08-29 12:04:07.222136",
+ "modified_by": "Administrator",
+ "module": "Clipboard",
+ "name": "Clipboard Item",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

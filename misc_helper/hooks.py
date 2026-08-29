@@ -44,6 +44,7 @@ use_json_request_body = True
 # app_include_js = "/assets/misc_helper/js/misc_helper.js"
 
 # include js, css files in header of web template
+web_include_css = "/assets/misc_helper/css/clipboard.css"
 # web_include_css = "/assets/misc_helper/css/misc_helper.css"
 # web_include_js = "/assets/misc_helper/js/misc_helper.js"
 
@@ -86,6 +87,11 @@ use_json_request_body = True
 # must be a non-desk route (not under /desk or /app); to customize setup within
 # desk, use setup_wizard_stages / setup_wizard_complete instead.
 # setup_wizard_url = "/misc_helper/setup"
+
+# Website
+# -------
+
+website_route_rules = [{"from_route": "/clipboard/<room_name>", "to_route": "clipboard/room"}]
 
 # Generators
 # ----------
@@ -182,6 +188,12 @@ use_json_request_body = True
 
 # Scheduled Tasks
 # ---------------
+
+scheduler_events = {
+	"daily": [
+		"misc_helper.clipboard.cleanup.delete_expired_rooms",
+	],
+}
 
 # scheduler_events = {
 # 	"all": [
@@ -294,4 +306,3 @@ require_type_annotated_api_methods = True
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
