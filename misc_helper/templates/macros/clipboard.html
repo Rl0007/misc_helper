@@ -27,7 +27,7 @@
 {# The room URL is the only credential a room has, so the naming convention IS the
    security model (spec §5). Shown on both pages. #}
 {%- macro naming_advice() -%}
-<div class="rounded-lg border border-outline-subtle bg-surface-subtle p-4 text-sm text-ink-secondary">
+<div class="cb-card bg-surface-subtle p-4 text-sm text-ink-secondary">
 	<p class="font-medium text-ink-strong">{{ _("Rooms are public. Anyone who knows the name is in the room.") }}</p>
 	<ul class="mt-2 space-y-1 list-disc pl-5">
 		<li>{{ _("Pick a name nobody else would type by accident — rahul-standup, not test.") }}</li>

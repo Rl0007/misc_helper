@@ -1,0 +1,23 @@
+{% extends "templates/base.html" %}
+
+{# Bare layout for misc_helper's own single-purpose tool pages (e.g. clipboard). Drops the
+   site-wide Standard Navbar/Footer web blocks, which are Website Settings chrome meant for a
+   marketing site and look out of place on a utility page. Still extends base.html — not a full
+   break from it — so frappe-web.bundle.js, the csrf token, and window.socketio_port keep working
+   for frappe.call/frappe.realtime, which clipboard's live sync depends on. #}
+
+{% block navbar %}{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block content %}
+<div class="cb-page flex min-h-screen flex-col bg-surface-base">
+	<header class="border-b border-outline-subtle bg-surface-card">
+		<div class="mx-auto flex w-full max-w-5xl items-center px-4 py-3">
+			<a href="/clipboard" class="text-sm font-semibold text-ink-strong">{{ _("Misc Helper") }}</a>
+		</div>
+	</header>
+	<main class="flex-1">
+		{% block page_content %}{% endblock %}
+	</main>
+</div>
+{% endblock %}

@@ -19,8 +19,6 @@ def get_context(context):
 	context.title = room["room_name"]
 	context.body_class = "bg-surface-base"
 	context.no_cache = 1
-	context.no_sidebar = 1
-	context.no_breadcrumbs = 1
 
 
 def get_qr_svg(url):
