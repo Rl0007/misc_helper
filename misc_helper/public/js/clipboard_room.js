@@ -150,7 +150,7 @@ document.addEventListener('alpine:init', () => {
 			this.is_busy = true;
 			this.error_message = '';
 			try {
-				await frappe.call({ method, args, type: 'POST' });
+				await call_api(method, args);
 				await this.refresh_room();
 			} catch (error) {
 				this.error_message = error.message || this.labels.request_failed;
@@ -162,10 +162,9 @@ document.addEventListener('alpine:init', () => {
 		async delete_item(item) {
 			this.error_message = '';
 			try {
-				await frappe.call({
-					method: 'misc_helper.clipboard.api.delete_item',
-					args: { room_name: this.room_name, item_name: item.name },
-					type: 'POST',
+				await call_api('misc_helper.clipboard.api.delete_item', {
+					room_name: this.room_name,
+					item_name: item.name,
 				});
 				await this.refresh_room();
 			} catch (error) {
@@ -207,6 +206,39 @@ document.addEventListener('alpine:init', () => {
 		},
 	}));
 });
+
+// A plain fetch, not frappe.call: on website pages frappe.call resolves to the lightweight
+// frappe/website/js/website.js implementation (not the desk request.js), whose process_response
+// unconditionally pops its own desk-style "Message" dialog for any _server_messages — with no
+// `silent` escape hatch — which is jarring on this bare page and duplicates the inline .cb-alert
+// below. Doing the request ourselves keeps that dialog from ever firing.
+async function call_api(method, args) {
+	const response = await fetch(`/api/method/${method}`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'X-Frappe-CSRF-Token': frappe.csrf_token,
+		},
+		body: JSON.stringify(args),
+	});
+	const body = await response.json().catch(() => ({}));
+	if (!response.ok) {
+		throw new Error(get_server_message(body) || '');
+	}
+	return body.message;
+}
+
+// The real text from frappe.throw() lives in _server_messages (a JSON-encoded array of
+// JSON-encoded {message, ...} objects; see frappe/public/js/frappe/widgets/chart_widget.js for
+// the same pattern) — never in a plain .message field.
+function get_server_message(body) {
+	try {
+		const server_messages = JSON.parse(body?._server_messages || '[]');
+		return server_messages.length ? JSON.parse(server_messages.at(-1)).message : null;
+	} catch {
+		return null;
+	}
+}
 
 async function get_base64(file) {
 	const bytes = new Uint8Array(await file.arrayBuffer());

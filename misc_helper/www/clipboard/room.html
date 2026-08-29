@@ -1,18 +1,22 @@
-{% extends "templates/web.html" %}
+{% extends "templates/layout.html" %}
 {% from "templates/macros/clipboard.html" import icon, naming_advice %}
 
 {% block title %}{{ room.room_name | e }}{% endblock %}
 
 {% block head_include %}
 {{ super() }}
-{# Registers the Alpine component, so it must run before Alpine boots and fires alpine:init. #}
-<script defer src="/assets/misc_helper/js/clipboard_room.js"></script>
+{# Registers the Alpine component, so it must run before Alpine boots and fires alpine:init.
+   clipboard_room.js is a plain static file, not a bundled asset -- bundled_asset() (and the
+   include_script() macro built on it) only content-hashes real *.bundle.js files, so a raw file
+   like this gets no cache-busting for free. Without the ?v= query, browsers can keep serving a
+   cached copy across deploys indefinitely; bump it whenever this file changes. #}
+<script defer src="/assets/misc_helper/js/clipboard_room.js?v=2"></script>
 <script defer src="/assets/misc_helper/js/alpine.min.js"></script>
 {% endblock %}
 
 {% block page_content %}
 <div
-	class="bg-surface-base text-ink-base py-6"
+	class="cb-page bg-surface-base text-ink-base py-6"
 	x-data='clipboard_room({{ {"room": room, "expires_in_seconds": expires_in_seconds, "labels": labels} | json | e }})'
 	@paste.window="add_from_paste($event)"
 >
@@ -20,15 +24,15 @@
 
 		<div class="grid gap-4 md:grid-cols-4">
 			<div class="md:col-span-3">
-				<h1 class="text-2xl font-semibold break-words text-ink-strong">{{ room.room_name | e }}</h1>
+				<h1 class="text-2xl font-semibold tracking-tight break-words text-ink-strong">{{ room.room_name | e }}</h1>
 				<p class="mt-1 text-sm break-all text-ink-muted">{{ room_url | e }}</p>
-				<p class="mt-2 inline-flex items-center gap-1.5 rounded-full border border-outline-subtle bg-surface-subtle px-2.5 py-1 text-xs text-ink-secondary">
+				<p class="cb-chip mt-2">
 					{{ icon("clock", "w-3.5 h-3.5") }}
 					<span x-text="expiry_label"></span>
 				</p>
 
 				{% if room.is_weak_name %}
-				<div class="mt-3 flex items-start gap-2 rounded-lg border border-outline-warning bg-surface-warning p-3 text-sm text-ink-warning">
+				<div class="cb-alert mt-3">
 					{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
 					<p>{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}</p>
 				</div>
@@ -38,52 +42,55 @@
 			<div class="md:col-span-1">
 				<button
 					type="button"
-					class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-outline-base bg-surface-card px-3 py-2 text-sm font-medium text-ink-strong md:hidden"
+					class="cb-btn cb-btn-secondary w-full md:hidden"
 					@click="show_qr = !show_qr"
 				>
 					{{ icon("qr") }}
 					<span x-show="!show_qr">{{ _("Show QR code") }}</span>
 					<span x-show="show_qr" x-cloak>{{ _("Hide QR code") }}</span>
 				</button>
-				<div class="mt-2 rounded-lg border border-outline-subtle bg-surface-card p-3 md:mt-0" x-show="show_qr" x-cloak>
+				<div class="cb-card mt-2 p-3 md:mt-0" x-show="show_qr" x-cloak>
 					<div class="mx-auto max-w-48 text-ink-strong">{{ qr_svg | safe }}</div>
 					<p class="mt-2 text-center text-xs text-ink-muted">{{ _("Scan to open this room on your phone") }}</p>
 				</div>
 			</div>
 		</div>
 
-		<form class="mt-5 rounded-xl border border-dashed border-outline-strong bg-surface-card p-4" @submit.prevent="send_draft()">
+		<form class="cb-card mt-5 p-4" @submit.prevent="send_draft()">
 			<label class="sr-only" for="draft_input">{{ _("Text to share") }}</label>
 			<textarea
 				id="draft_input"
 				x-model="draft_text"
 				rows="3"
 				placeholder="{{ _('Press Ctrl+V anywhere on this page, or type here and send.') }}"
-				class="w-full resize-y rounded-lg border border-outline-base bg-surface-base px-3 py-2 text-base text-ink-strong placeholder:text-ink-subtle focus:border-outline-focus focus:outline-none"
+				class="cb-field resize-y"
 			></textarea>
 			<div class="mt-3 flex flex-wrap items-center gap-2">
 				<button
 					type="submit"
 					:disabled="is_busy || !draft_text.trim()"
-					class="inline-flex items-center gap-2 rounded-lg bg-surface-solid px-4 py-2 text-sm font-medium text-ink-inverse disabled:opacity-50"
+					class="cb-btn cb-btn-primary disabled:opacity-50"
 				>
 					{{ icon("send") }}
 					{{ _("Send") }}
 				</button>
-				<label class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-outline-base bg-surface-card px-4 py-2 text-sm font-medium text-ink-strong">
+				<label class="cb-btn cb-btn-secondary cursor-pointer">
 					{{ icon("image") }}
 					{{ _("Add image") }}
 					<input type="file" accept="image/*" class="hidden" @change="add_picked_image($event)">
 				</label>
 				<span class="text-sm text-ink-muted" x-show="is_busy" x-cloak>{{ _("Sending…") }}</span>
 			</div>
-			<p class="mt-2 text-sm text-ink-danger" x-show="error_message" x-text="error_message" x-cloak></p>
+			<div class="cb-alert cb-alert-danger mt-3" x-show="error_message" x-cloak>
+				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
+				<p x-text="error_message"></p>
+			</div>
 		</form>
 
 		{# Server paint: Alpine removes it the moment it boots and takes over with the live list below. #}
 		<ul class="mt-5 list-none space-y-3 pl-0" x-init="$el.remove()">
 			{% for item in room["items"] %}
-			<li class="rounded-xl border border-outline-subtle bg-surface-card p-3">
+			<li class="cb-card p-3">
 				{% if item.item_type == "Image" %}
 				<a href="{{ item.file_url | e }}" target="_blank" rel="noopener">
 					<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
@@ -98,7 +105,7 @@
 
 		<ul class="mt-5 list-none space-y-3 pl-0">
 			<template x-for="item in items" :key="item.name">
-				<li class="rounded-xl border border-outline-subtle bg-surface-card p-3">
+				<li class="cb-card p-3">
 					<template x-if="item.item_type === 'Image'">
 						<a :href="item.file_url" target="_blank" rel="noopener">
 							<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
@@ -109,11 +116,11 @@
 					</template>
 					<div class="mt-2 flex items-center justify-between gap-2">
 						<span class="min-w-0 truncate text-xs text-ink-muted" x-text="format_item_meta(item)"></span>
-						<div class="flex shrink-0 items-center gap-1">
+						<div class="flex shrink-0 items-center gap-1.5">
 							<button
 								type="button"
-								class="inline-flex items-center gap-1.5 rounded-md border border-outline-base bg-surface-card px-2.5 py-1.5 text-xs font-medium text-ink-strong"
-								:class="copied_item_name === item.name ? 'border-outline-success text-ink-success' : ''"
+								class="cb-btn cb-btn-secondary !h-8 px-2.5 py-0 text-xs"
+								:class="copied_item_name === item.name ? '!border-outline-success !text-ink-success' : ''"
 								@click="copy_item(item)"
 							>
 								<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
@@ -123,7 +130,7 @@
 							</button>
 							<button
 								type="button"
-								class="inline-flex items-center gap-1.5 rounded-md border border-outline-danger bg-surface-danger px-2.5 py-1.5 text-xs font-medium text-ink-danger"
+								class="cb-icon-btn cb-icon-btn-danger !h-8 !w-8"
 								@click="delete_item(item)"
 							>
 								{{ icon("trash", "w-3.5 h-3.5") }}
@@ -136,7 +143,7 @@
 		</ul>
 
 		<div class="mt-5 space-y-4" x-show="!items.length" x-cloak>
-			<div class="rounded-xl border border-dashed border-outline-strong bg-surface-card p-6 text-center">
+			<div class="cb-card border-dashed p-6 text-center">
 				<p class="text-sm font-medium text-ink-strong">{{ _("Nothing here yet.") }}</p>
 				<p class="mt-1 text-sm text-ink-muted">
 					{{ _("Paste with Ctrl+V, or type above. Everything in this room is deleted") }}
