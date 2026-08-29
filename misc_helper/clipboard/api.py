@@ -243,7 +243,13 @@ def save_write(room_name: str) -> None:
 	)
 	# The payload stays empty on purpose: the website room broadcasts to every socket on the
 	# site, so it may never carry content. Clients re-fetch through get_room, which authorizes.
-	frappe.realtime.publish_to_website(f"clipboard_update:{room_name}", {}, after_commit=True)
+	#
+	# publish_to_website() is a v17-only convenience wrapper (frappe/realtime/__init__.py) that
+	# does not exist on v16, which this app targets -- AttributeError in production. Call the
+	# underlying publish_realtime() with the same room directly; both exist on every version.
+	frappe.publish_realtime(
+		f"clipboard_update:{room_name}", {}, room=frappe.realtime.get_website_room(), after_commit=True
+	)
 
 
 def get_image_bytes(data_base64: str, max_image_size_mb: float) -> bytes:
