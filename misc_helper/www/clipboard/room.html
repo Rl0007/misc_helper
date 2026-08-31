@@ -62,8 +62,9 @@
 				id="draft_input"
 				x-model="draft_text"
 				rows="3"
-				placeholder="{{ _('Press Ctrl+V anywhere on this page, or type here and send.') }}"
+				placeholder="{{ _('Press Ctrl+V anywhere on this page, or type here and send. Ctrl+Enter (⌘+Enter on Mac) sends too.') }}"
 				class="cb-field resize-y"
+				@keydown.enter="if ($event.ctrlKey || $event.metaKey) { $event.preventDefault(); send_draft(); }"
 			></textarea>
 			<div class="mt-3 flex flex-wrap items-center gap-2">
 				<button
