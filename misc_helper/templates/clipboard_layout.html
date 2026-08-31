@@ -4,7 +4,13 @@
    site-wide Standard Navbar/Footer web blocks, which are Website Settings chrome meant for a
    marketing site and look out of place on a utility page. Still extends base.html — not a full
    break from it — so frappe-web.bundle.js, the csrf token, and window.socketio_port keep working
-   for frappe.call/frappe.realtime, which clipboard's live sync depends on. #}
+   for frappe.call/frappe.realtime, which clipboard's live sync depends on.
+
+   NEVER rename this file to the generic "layout.html": Frappe's Jinja loader resolves
+   "templates/<name>" by searching every installed app's templates/ folder with no per-app
+   namespacing, so a same-named file in another installed app on the same site silently wins or
+   loses depending on install order. On this exact site that collided with rahul/templates/
+   layout.html and quietly ate the site's real homepage until this file was renamed. #}
 
 {% block navbar %}{% endblock %}
 {% block footer %}{% endblock %}
