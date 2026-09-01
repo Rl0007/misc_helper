@@ -262,8 +262,23 @@ the Tailwind scanner drops them.
 
 ### 9.3 Layout & interactions
 
-**Layout:** room name as heading · expiry countdown · QR code (collapsed on mobile) ·
-large paste box · item list, newest first.
+**Layout (revised 2026-09-01):** a chat shell. One compact bar — room name, expiry countdown,
+Delete-after select, QR in a popover — then a scrolling item pane reading **oldest first**, then a
+composer docked at the bottom.
+
+- The shell is `h-dvh overflow-hidden` (`dvh`, so the composer is not hidden behind a phone's
+  collapsing URL bar) and only the item pane scrolls. `clipboard_layout.html` exposes
+  `shell_class`/`main_class` blocks for this; every other page keeps ordinary document scrolling.
+- **The item pane must be `position: relative`.** Frappe's bundled `.sr-only` is
+  `position: absolute`, so with no positioned ancestor every per-item screen-reader label is laid
+  out against the document instead of the pane and stretches it — the page then scrolls behind a
+  shell that is meant to be fixed height.
+- **Anything typographic needs its margins zeroed by hand.** Preflight is deliberately not
+  imported, so Bootstrap's own `h1` margins survive and push the room name off its row.
+- `items` stays newest-first in component state — that is what Ctrl+C and the realtime refresh
+  mean by "latest" — and only the render order is reversed, via an `ordered_items` getter.
+- New items scroll into view **only if the reader was already at the bottom**; yanking someone
+  away from history they are scrolled up reading is the classic chat-view bug.
 
 - A document-level `paste` handler, so <kbd>Ctrl+V</kbd> works anywhere on the page without
   focusing anything. Text → `add_text`. Any pasted file → base64 → `add_file`.

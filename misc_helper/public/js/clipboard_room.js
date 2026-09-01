@@ -20,9 +20,38 @@ document.addEventListener('alpine:init', () => {
 		labels: context.labels,
 
 		init() {
-			this.show_qr = window.matchMedia('(min-width: 768px)').matches;
 			setInterval(() => this.count_down(), 1000);
 			this.add_realtime_listener();
+			this.$nextTick(() => this.scroll_to_latest());
+		},
+
+		// The API returns newest first -- that is the order Ctrl+C and the realtime refresh care
+		// about -- while the pane reads oldest first like a chat log. Reversing here keeps
+		// items[0] meaning "newest" everywhere else in the component.
+		get ordered_items() {
+			return [...this.items].reverse();
+		},
+
+		scroll_to_latest() {
+			const pane = this.$refs.item_pane;
+			if (pane) {
+				pane.scrollTop = pane.scrollHeight;
+			}
+		},
+
+		// Only follow along if the reader was already at the bottom. Yanking someone away from
+		// history they are scrolled up reading is the classic chat-view bug.
+		is_following_latest() {
+			const pane = this.$refs.item_pane;
+			if (!pane) {
+				return true;
+			}
+			return pane.scrollHeight - pane.scrollTop - pane.clientHeight < 120;
+		},
+
+		resize_draft(textarea) {
+			textarea.style.height = 'auto';
+			textarea.style.height = `${textarea.scrollHeight}px`;
 		},
 
 		get is_dragging() {
@@ -91,6 +120,7 @@ document.addEventListener('alpine:init', () => {
 		},
 
 		async refresh_room() {
+			const was_following = this.is_following_latest();
 			const response = await frappe.call({
 				method: 'misc_helper.clipboard.api.get_room',
 				args: { room_name: this.room_name },
@@ -99,6 +129,9 @@ document.addEventListener('alpine:init', () => {
 			this.items = room.items;
 			this.validity_hours = room.validity_hours;
 			this.set_expiry(room.expires_on);
+			if (was_following) {
+				this.$nextTick(() => this.scroll_to_latest());
+			}
 		},
 
 		async send_draft() {
@@ -108,6 +141,10 @@ document.addEventListener('alpine:init', () => {
 			}
 			await this.save_text(content);
 			this.draft_text = '';
+			const draft = document.getElementById('draft_input');
+			if (draft) {
+				this.resize_draft(draft);
+			}
 		},
 
 		async save_validity() {

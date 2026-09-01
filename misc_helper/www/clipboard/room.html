@@ -3,6 +3,11 @@
 
 {% block title %}{{ room.room_name | e }}{% endblock %}
 
+{# Chat shell: the document itself never scrolls, the item pane does. dvh rather than vh so the
+   composer is not hidden behind a phone's collapsing URL bar. #}
+{% block shell_class %}h-dvh overflow-hidden{% endblock %}
+{% block main_class %}min-h-0{% endblock %}
+
 {% block head_include %}
 {{ super() }}
 {# Registers the Alpine component, so it must run before Alpine boots and fires alpine:init.
@@ -10,13 +15,13 @@
    include_script() macro built on it) only content-hashes real *.bundle.js files, so a raw file
    like this gets no cache-busting for free. Without the ?v= query, browsers can keep serving a
    cached copy across deploys indefinitely; bump it whenever this file changes. #}
-<script defer src="/assets/misc_helper/js/clipboard_room.js?v=4"></script>
+<script defer src="/assets/misc_helper/js/clipboard_room.js?v=5"></script>
 <script defer src="/assets/misc_helper/js/alpine.min.js"></script>
 {% endblock %}
 
 {% block page_content %}
 <div
-	class="cb-page bg-surface-base text-ink-base py-6"
+	class="flex h-full flex-col text-ink-base"
 	x-data='clipboard_room({{ {"room": room, "expires_in_seconds": expires_in_seconds, "labels": labels, "video_file_types": video_file_types} | json | e }})'
 	@paste.window="add_from_paste($event)"
 	@keydown.window.ctrl.c="copy_latest($event)"
@@ -38,172 +43,204 @@
 			<p class="mt-1 text-xs text-ink-muted">{{ allowed_file_types | join(" · ") | e }}</p>
 		</div>
 	</div>
-	<div class="mx-auto w-full max-w-3xl px-4">
 
-		<div class="grid gap-4 md:grid-cols-4">
-			<div class="md:col-span-3">
-				<h1 class="text-2xl font-semibold tracking-tight break-words text-ink-strong">{{ room.room_name | e }}</h1>
-				<p class="mt-1 text-sm break-all text-ink-muted">{{ room_url | e }}</p>
-				<div class="mt-2 flex flex-wrap items-center gap-2">
-					<p class="cb-chip">
-						{{ icon("clock", "w-3.5 h-3.5") }}
-						<span x-text="expiry_label"></span>
-					</p>
-					<label class="flex items-center gap-1.5 text-xs text-ink-muted">
-						{{ _("Delete after") }}
-						<select
-							class="cb-field !h-7 !w-auto !py-0 text-xs"
-							x-model.number="validity_hours"
-							@change="save_validity()"
-						>
-							{% for option in validity_options %}
-							<option value="{{ option.hours }}">{{ option.label }}</option>
-							{% endfor %}
-						</select>
-					</label>
-				</div>
+	{# ---- room bar ------------------------------------------------------------------------ #}
+	<div class="shrink-0 border-b border-outline-subtle bg-surface-card">
+		{# No wrapping: the room name truncates instead of dropping to its own line under the
+		   controls, which reads as a broken layout on a long name. #}
+		<div class="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-2.5 sm:gap-3">
+			{# m-0 is required: preflight is deliberately not imported (see tailwind/clipboard.css),
+			   so Bootstrap's own h1 margins survive and would push the name off the row. #}
+			<h1 class="m-0 min-w-0 flex-1 truncate text-base font-semibold tracking-tight text-ink-strong">{{ room.room_name | e }}</h1>
 
-				{% if room.is_weak_name %}
-				<div class="cb-alert mt-3">
-					{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
-					<p>{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}</p>
-				</div>
-				{% endif %}
-			</div>
+			<p class="cb-chip shrink-0">
+				{{ icon("clock", "w-3.5 h-3.5") }}
+				<span x-text="expiry_label"></span>
+			</p>
 
-			<div class="md:col-span-1">
+			<label class="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+				<span class="hidden sm:inline">{{ _("Delete after") }}</span>
+				<select
+					class="cb-field !h-7 !w-auto !py-0 text-xs"
+					x-model.number="validity_hours"
+					@change="save_validity()"
+				>
+					{% for option in validity_options %}
+					<option value="{{ option.hours }}">{{ option.label }}</option>
+					{% endfor %}
+				</select>
+			</label>
+
+			<div class="relative shrink-0" @click.outside="show_qr = false">
 				<button
 					type="button"
-					class="cb-btn cb-btn-secondary w-full md:hidden"
+					class="cb-icon-btn !h-7 !w-7"
+					:aria-expanded="show_qr"
 					@click="show_qr = !show_qr"
 				>
-					{{ icon("qr") }}
-					<span x-show="!show_qr">{{ _("Show QR code") }}</span>
-					<span x-show="show_qr" x-cloak>{{ _("Hide QR code") }}</span>
+					{{ icon("qr", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Show QR code") }}</span>
 				</button>
-				<div class="cb-card mt-2 p-3 md:mt-0" x-show="show_qr" x-cloak>
-					<div class="mx-auto max-w-48 text-ink-strong">{{ qr_svg | safe }}</div>
+				<div
+					class="cb-card absolute right-0 top-full z-40 mt-2 w-56 p-3 shadow-cb-md"
+					x-show="show_qr"
+					x-cloak
+				>
+					<div class="mx-auto max-w-40 text-ink-strong">{{ qr_svg | safe }}</div>
 					<p class="mt-2 text-center text-xs text-ink-muted">{{ _("Scan to open this room on your phone") }}</p>
+					<p class="mt-2 text-center text-xs break-all text-ink-subtle">{{ room_url | e }}</p>
 				</div>
 			</div>
 		</div>
 
-		<form class="cb-card mt-5 p-4" @submit.prevent="send_draft()">
+		{% if room.is_weak_name %}
+		<div class="mx-auto w-full max-w-3xl px-4 pb-2.5">
+			<div class="cb-alert">
+				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
+				<p>{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}</p>
+			</div>
+		</div>
+		{% endif %}
+	</div>
+
+	{# ---- item pane ------------------------------------------------------------------------ #}
+	{# `relative` is load-bearing, not decoration: Frappe's bundled .sr-only is position:absolute,
+	   so with no positioned ancestor every per-item screen-reader label escapes this scroll
+	   container, is laid out against the document, and stretches it -- the page then scrolls
+	   behind a shell that is supposed to be fixed height. #}
+	<div class="relative min-h-0 flex-1 overflow-y-auto" x-ref="item_pane">
+		<div class="mx-auto w-full max-w-3xl px-4 py-4">
+
+			{# Server paint: Alpine removes it the moment it boots and takes over with the live
+			   list below. Reversed, because the API returns newest first and this reads oldest
+			   first like a chat log. #}
+			<ul class="list-none space-y-3 pl-0" x-init="$el.remove()">
+				{% for item in room["items"] | reverse %}
+				<li class="cb-card p-3">
+					{% if item.item_type == "Image" %}
+					<a href="{{ item.file_url | e }}" target="_blank" rel="noopener">
+						<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
+					</a>
+					{% elif item.item_type == "File" %}
+					{% if item.file_type in video_file_types %}
+					<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" src="{{ item.file_url | e }}"></video>
+					{% else %}
+					<a class="cb-btn cb-btn-secondary" href="{{ item.file_url | e }}" download>
+						{{ icon("download") }}
+						{{ item.file_name | e }}
+					</a>
+					{% endif %}
+					{% else %}
+					<pre class="max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong">{{ item.content | e }}</pre>
+					{% endif %}
+					<p class="mt-2 text-xs text-ink-muted">{{ _("Text") if item.item_type == "Text" else item.file_name | e }}</p>
+				</li>
+				{% endfor %}
+			</ul>
+
+			<div class="space-y-4" x-show="!items.length" x-cloak>
+				<div class="cb-card border-dashed p-6 text-center">
+					<p class="text-sm font-medium text-ink-strong">{{ _("Nothing here yet.") }}</p>
+					<p class="mt-1 text-sm text-ink-muted">
+						{{ _("Paste with Ctrl+V, drop a file anywhere, or type below. Ctrl+C copies the newest item back out. Everything in this room is deleted") }}
+						<span x-text="expiry_label"></span>.
+					</p>
+				</div>
+				{{ naming_advice() }}
+			</div>
+
+			<ul class="list-none space-y-3 pl-0">
+				<template x-for="item in ordered_items" :key="item.name">
+					<li class="cb-card p-3">
+						<template x-if="item.item_type === 'Image'">
+							<a :href="item.file_url" target="_blank" rel="noopener">
+								<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
+							</a>
+						</template>
+						<template x-if="item.item_type === 'File' && is_video(item)">
+							<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" :src="item.file_url"></video>
+						</template>
+						<template x-if="item.item_type === 'File' && !is_video(item)">
+							<a class="cb-btn cb-btn-secondary max-w-full" :href="item.file_url" download>
+								{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
+								<span class="truncate" x-text="item.file_name"></span>
+							</a>
+						</template>
+						<template x-if="item.item_type === 'Text'">
+							<pre class="max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong" x-text="item.content"></pre>
+						</template>
+						<div class="mt-2 flex items-center justify-between gap-2">
+							<span class="min-w-0 truncate text-xs text-ink-muted" x-text="format_item_meta(item)"></span>
+							<div class="flex shrink-0 items-center gap-1.5">
+								<button
+									type="button"
+									class="cb-btn cb-btn-secondary !h-8 px-2.5 py-0 text-xs"
+									:class="copied_item_name === item.name ? '!border-outline-success !text-ink-success' : ''"
+									@click="copy_item(item)"
+								>
+									<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
+									<span x-show="copied_item_name === item.name" x-cloak>{{ icon("check", "w-3.5 h-3.5") }}</span>
+									<span x-show="copied_item_name !== item.name">{{ _("Copy") }}</span>
+									<span x-show="copied_item_name === item.name" x-cloak>{{ _("Copied") }}</span>
+								</button>
+								<button
+									type="button"
+									class="cb-icon-btn cb-icon-btn-danger !h-8 !w-8"
+									@click="delete_item(item)"
+								>
+									{{ icon("trash", "w-3.5 h-3.5") }}
+									<span class="sr-only">{{ _("Delete") }}</span>
+								</button>
+							</div>
+						</div>
+					</li>
+				</template>
+			</ul>
+		</div>
+	</div>
+
+	{# ---- composer -------------------------------------------------------------------------- #}
+	<div class="relative shrink-0 border-t border-outline-subtle bg-surface-card">
+		{# Anchored above the composer rather than inside it, so a long message never pushes the
+		   input off a phone screen. #}
+		<div class="absolute bottom-full left-0 w-full px-4 pb-2" x-show="error_message" x-cloak>
+			<div class="cb-alert cb-alert-danger mx-auto max-w-3xl shadow-cb-md">
+				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
+				<p class="flex-1" x-text="error_message"></p>
+				<button type="button" class="shrink-0 text-ink-muted" @click="error_message = ''">
+					<span aria-hidden="true">&times;</span>
+					<span class="sr-only">{{ _("Dismiss") }}</span>
+				</button>
+			</div>
+		</div>
+
+		<form class="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-3" @submit.prevent="send_draft()">
 			<label class="sr-only" for="draft_input">{{ _("Text to share") }}</label>
 			<textarea
 				id="draft_input"
 				x-model="draft_text"
-				rows="3"
-				placeholder="{{ _('Press Ctrl+V anywhere on this page, or type here and send. Ctrl+Enter (⌘+Enter on Mac) sends too.') }}"
-				class="cb-field resize-y"
+				rows="1"
+				placeholder="{{ _('Type, paste, or drop a file') }}"
+				class="cb-field max-h-40 flex-1 resize-none"
+				@input="resize_draft($event.target)"
 				@keydown.enter="if ($event.ctrlKey || $event.metaKey) { $event.preventDefault(); send_draft(); }"
 			></textarea>
-			<div class="mt-3 flex flex-wrap items-center gap-2">
-				<button
-					type="submit"
-					:disabled="is_busy || !draft_text.trim()"
-					class="cb-btn cb-btn-primary disabled:opacity-50"
-				>
-					{{ icon("send") }}
-					{{ _("Send") }}
-				</button>
-				<label class="cb-btn cb-btn-secondary cursor-pointer">
-					{{ icon("paperclip") }}
-					{{ _("Add files") }}
-					<input type="file" accept="{{ accept_attribute | e }}" multiple class="hidden" @change="add_picked_files($event)">
-				</label>
-				<span class="text-xs text-ink-muted">{{ _("or drop them anywhere on this page") }}</span>
-				<span class="text-sm text-ink-muted" x-show="is_busy" x-cloak>{{ _("Sending…") }}</span>
-			</div>
-			<div class="cb-alert cb-alert-danger mt-3" x-show="error_message" x-cloak>
-				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
-				<p x-text="error_message"></p>
-			</div>
+
+			<label class="cb-icon-btn shrink-0 cursor-pointer" :aria-busy="is_busy">
+				{{ icon("paperclip", "w-4 h-4") }}
+				<span class="sr-only">{{ _("Add files") }}</span>
+				<input type="file" accept="{{ accept_attribute | e }}" multiple class="hidden" @change="add_picked_files($event)">
+			</label>
+
+			<button
+				type="submit"
+				:disabled="is_busy || !draft_text.trim()"
+				class="cb-btn cb-btn-primary shrink-0 !h-9 !w-9 !px-0 disabled:opacity-50"
+			>
+				{{ icon("send", "w-4 h-4") }}
+				<span class="sr-only">{{ _("Send") }}</span>
+			</button>
 		</form>
-
-		{# Server paint: Alpine removes it the moment it boots and takes over with the live list below. #}
-		<ul class="mt-5 list-none space-y-3 pl-0" x-init="$el.remove()">
-			{% for item in room["items"] %}
-			<li class="cb-card p-3">
-				{% if item.item_type == "Image" %}
-				<a href="{{ item.file_url | e }}" target="_blank" rel="noopener">
-					<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
-				</a>
-				{% elif item.item_type == "File" %}
-				{% if item.file_type in video_file_types %}
-				<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" src="{{ item.file_url | e }}"></video>
-				{% else %}
-				<a class="cb-btn cb-btn-secondary" href="{{ item.file_url | e }}" download>
-					{{ icon("download") }}
-					{{ item.file_name | e }}
-				</a>
-				{% endif %}
-				{% else %}
-				<pre class="max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong">{{ item.content | e }}</pre>
-				{% endif %}
-				<p class="mt-2 text-xs text-ink-muted">{{ _("Text") if item.item_type == "Text" else item.file_name | e }}</p>
-			</li>
-			{% endfor %}
-		</ul>
-
-		<ul class="mt-5 list-none space-y-3 pl-0">
-			<template x-for="item in items" :key="item.name">
-				<li class="cb-card p-3">
-					<template x-if="item.item_type === 'Image'">
-						<a :href="item.file_url" target="_blank" rel="noopener">
-							<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
-						</a>
-					</template>
-					<template x-if="item.item_type === 'File' && is_video(item)">
-						<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" :src="item.file_url"></video>
-					</template>
-					<template x-if="item.item_type === 'File' && !is_video(item)">
-						<a class="cb-btn cb-btn-secondary max-w-full" :href="item.file_url" download>
-							{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
-							<span class="truncate" x-text="item.file_name"></span>
-						</a>
-					</template>
-					<template x-if="item.item_type === 'Text'">
-						<pre class="max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong" x-text="item.content"></pre>
-					</template>
-					<div class="mt-2 flex items-center justify-between gap-2">
-						<span class="min-w-0 truncate text-xs text-ink-muted" x-text="format_item_meta(item)"></span>
-						<div class="flex shrink-0 items-center gap-1.5">
-							<button
-								type="button"
-								class="cb-btn cb-btn-secondary !h-8 px-2.5 py-0 text-xs"
-								:class="copied_item_name === item.name ? '!border-outline-success !text-ink-success' : ''"
-								@click="copy_item(item)"
-							>
-								<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
-								<span x-show="copied_item_name === item.name" x-cloak>{{ icon("check", "w-3.5 h-3.5") }}</span>
-								<span x-show="copied_item_name !== item.name">{{ _("Copy") }}</span>
-								<span x-show="copied_item_name === item.name" x-cloak>{{ _("Copied") }}</span>
-							</button>
-							<button
-								type="button"
-								class="cb-icon-btn cb-icon-btn-danger !h-8 !w-8"
-								@click="delete_item(item)"
-							>
-								{{ icon("trash", "w-3.5 h-3.5") }}
-								<span class="sr-only">{{ _("Delete") }}</span>
-							</button>
-						</div>
-					</div>
-				</li>
-			</template>
-		</ul>
-
-		<div class="mt-5 space-y-4" x-show="!items.length" x-cloak>
-			<div class="cb-card border-dashed p-6 text-center">
-				<p class="text-sm font-medium text-ink-strong">{{ _("Nothing here yet.") }}</p>
-				<p class="mt-1 text-sm text-ink-muted">
-					{{ _("Paste with Ctrl+V, drop a file anywhere, or type above. Ctrl+C copies the newest item back out. Everything in this room is deleted") }}
-					<span x-text="expiry_label"></span>.
-				</p>
-			</div>
-			{{ naming_advice() }}
-		</div>
 	</div>
 </div>
 {% endblock %}
