@@ -1,3 +1,7 @@
+const SENDER_STORAGE_KEY = 'clipboard_sender';
+const ROOMS_STORAGE_KEY = 'clipboard_rooms';
+const SENDER_PATTERN = /^[a-f0-9]{16,64}$/;
+
 document.addEventListener('alpine:init', () => {
 	Alpine.data('clipboard_room', (context) => ({
 		room_name: context.room.room_name,
@@ -6,56 +10,123 @@ document.addEventListener('alpine:init', () => {
 		expires_on: context.room.expires_on,
 		validity_hours: context.room.validity_hours,
 		allowed_file_types: context.room.allowed_file_types,
-		video_file_types: context.video_file_types,
 		max_file_bytes: context.room.max_file_bytes,
+		video_file_types: context.video_file_types,
+		sender: get_or_create_sender(),
+		rooms: [],
+		pending_files: [],
 		draft_text: '',
 		error_message: '',
 		copied_item_name: '',
+		renaming_slug: '',
+		rename_draft: '',
 		is_busy: false,
 		show_qr: false,
+		show_sidebar: false,
 		// dragenter/dragleave also fire as the pointer crosses each child element, so a boolean
 		// flickers the overlay off mid-drag. Counting enters against leaves does not.
 		drag_depth: 0,
 		poll_timer: null,
+		is_settling: true,
 		labels: context.labels,
 
 		init() {
+			this.remember_room();
 			setInterval(() => this.count_down(), 1000);
 			this.add_realtime_listener();
 			this.$nextTick(() => this.scroll_to_latest());
+			// Images and video report their height only once decoded, so the first scroll lands
+			// short and the newest bubble sits half under the composer. Keep re-pinning until
+			// the media in view has settled.
+			setTimeout(() => {
+				this.is_settling = false;
+			}, 3000);
 		},
 
-		// The API returns newest first -- that is the order Ctrl+C and the realtime refresh care
-		// about -- while the pane reads oldest first like a chat log. Reversing here keeps
-		// items[0] meaning "newest" everywhere else in the component.
+		on_media_load() {
+			if (this.is_settling || this.is_following_latest()) {
+				this.scroll_to_latest();
+			}
+		},
+
+		// ---- rooms this browser has visited -------------------------------------------------
+		//
+		// Deliberately local, not a server listing. Rooms are public and guessable by design and
+		// the name IS the credential (spec §5), so an endpoint enumerating every room would hand
+		// each visitor a working key to everyone else's. The rename lives here for the same
+		// reason: the slug is the address and must not change, so the label is this browser's
+		// private nickname for it.
+		remember_room() {
+			const rooms = load_rooms();
+			const existing = rooms.find((room) => room.slug === this.room_name);
+			if (existing) {
+				existing.opened_at = Date.now();
+			} else {
+				rooms.push({
+					slug: this.room_name,
+					label: this.room_name,
+					opened_at: Date.now(),
+				});
+			}
+			this.sort_and_save(rooms);
+		},
+
+		sort_and_save(rooms) {
+			this.rooms = rooms.sort(
+				(first, second) => second.opened_at - first.opened_at,
+			);
+			write_storage(ROOMS_STORAGE_KEY, this.rooms);
+		},
+
+		get current_label() {
+			const room = this.rooms.find((entry) => entry.slug === this.room_name);
+			return room ? room.label : this.room_name;
+		},
+
+		start_rename(room) {
+			this.renaming_slug = room.slug;
+			this.rename_draft = room.label;
+			this.$nextTick(() => this.$refs[`rename_${room.slug}`]?.focus());
+		},
+
+		save_rename() {
+			const room = this.rooms.find(
+				(entry) => entry.slug === this.renaming_slug,
+			);
+			if (room) {
+				// An emptied name falls back to the slug rather than leaving an unclickable blank.
+				room.label = this.rename_draft.trim() || room.slug;
+				this.sort_and_save(this.rooms);
+			}
+			this.cancel_rename();
+		},
+
+		cancel_rename() {
+			this.renaming_slug = '';
+			this.rename_draft = '';
+		},
+
+		forget_room(room) {
+			this.sort_and_save(
+				this.rooms.filter((entry) => entry.slug !== room.slug),
+			);
+		},
+
+		// ---- chat sides ----------------------------------------------------------------------
+		is_mine(item) {
+			return !!item.sender && item.sender === this.sender;
+		},
+
+		// ---- item grouping ---------------------------------------------------------------------
+		//
+		// items stays newest-first, because that is what Ctrl+C and the realtime refresh mean by
+		// "latest". Only the render order is reversed, so the pane reads oldest-first like a chat.
+		get pinned_items() {
+			return this.items.filter((item) => Number(item.is_pinned));
+		},
+
 		get ordered_items() {
-			return [...this.items].reverse();
-		},
-
-		scroll_to_latest() {
-			const pane = this.$refs.item_pane;
-			if (pane) {
-				pane.scrollTop = pane.scrollHeight;
-			}
-		},
-
-		// Only follow along if the reader was already at the bottom. Yanking someone away from
-		// history they are scrolled up reading is the classic chat-view bug.
-		is_following_latest() {
-			const pane = this.$refs.item_pane;
-			if (!pane) {
-				return true;
-			}
-			return pane.scrollHeight - pane.scrollTop - pane.clientHeight < 120;
-		},
-
-		resize_draft(textarea) {
-			textarea.style.height = 'auto';
-			textarea.style.height = `${textarea.scrollHeight}px`;
-		},
-
-		get is_dragging() {
-			return this.drag_depth > 0;
+			return this.items.filter((item) => !Number(item.is_pinned)).reverse();
 		},
 
 		get expiry_label() {
@@ -91,6 +162,28 @@ document.addEventListener('alpine:init', () => {
 				this.seconds_left + Math.round(shift / 1000),
 			);
 			this.expires_on = expires_on;
+		},
+
+		scroll_to_latest() {
+			const pane = this.$refs.item_pane;
+			if (pane) {
+				pane.scrollTop = pane.scrollHeight;
+			}
+		},
+
+		// Only follow along if the reader was already at the bottom. Yanking someone away from
+		// history they are scrolled up reading is the classic chat-view bug.
+		is_following_latest() {
+			const pane = this.$refs.item_pane;
+			if (!pane) {
+				return true;
+			}
+			return pane.scrollHeight - pane.scrollTop - pane.clientHeight < 120;
+		},
+
+		resize_draft(textarea) {
+			textarea.style.height = 'auto';
+			textarea.style.height = `${textarea.scrollHeight}px`;
 		},
 
 		add_realtime_listener() {
@@ -134,30 +227,61 @@ document.addEventListener('alpine:init', () => {
 			}
 		},
 
+		// ---- composing ---------------------------------------------------------------------
+		//
+		// Attachments stage here rather than uploading on drop, so the draft text can ride along
+		// as the caption. Pasted TEXT still posts instantly with no Send press — that is the
+		// point of the product, and there is no file for it to be a caption for.
 		async send_draft() {
-			const content = this.draft_text.trim();
-			if (!content) {
+			const caption = this.draft_text.trim();
+			if (!this.pending_files.length) {
+				if (caption) {
+					this.draft_text = '';
+					this.reset_draft_height();
+					await this.save_text(caption);
+				}
 				return;
 			}
-			await this.save_text(content);
+
+			const files = this.pending_files;
+			this.pending_files = [];
 			this.draft_text = '';
-			const draft = document.getElementById('draft_input');
-			if (draft) {
-				this.resize_draft(draft);
+			this.reset_draft_height();
+
+			// Sequential, not Promise.all: each upload slides the room expiry and publishes a
+			// realtime ping, and every one counts against the per-room write rate limit. Only the
+			// first file carries the caption, so one caption never repeats across a batch.
+			for (const [index, file] of files.entries()) {
+				await this.save_file(file, index === 0 ? caption : '');
+				if (this.error_message) {
+					return;
+				}
 			}
 		},
 
-		async save_validity() {
-			this.error_message = '';
-			try {
-				const room = await call_api('misc_helper.clipboard.api.set_validity', {
-					room_name: this.room_name,
-					validity_hours: this.validity_hours,
-				});
-				this.set_expiry(room.expires_on);
-			} catch (error) {
-				this.error_message = error.message || this.labels.request_failed;
+		reset_draft_height() {
+			const draft = document.getElementById('draft_input');
+			if (draft) {
+				this.$nextTick(() => this.resize_draft(draft));
 			}
+		},
+
+		stage_files(files) {
+			for (const file of files) {
+				if (!this.is_allowed(file)) {
+					return;
+				}
+				this.pending_files.push(file);
+			}
+			this.error_message = '';
+		},
+
+		remove_pending(index) {
+			this.pending_files.splice(index, 1);
+		},
+
+		pending_preview(file) {
+			return file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
 		},
 
 		async add_from_paste(event) {
@@ -168,7 +292,7 @@ document.addEventListener('alpine:init', () => {
 
 			if (pasted_files.length) {
 				event.preventDefault();
-				await this.upload_files(pasted_files);
+				this.stage_files(pasted_files);
 				return;
 			}
 
@@ -184,45 +308,15 @@ document.addEventListener('alpine:init', () => {
 			}
 		},
 
-		// Ctrl+C with nothing selected copies the newest item, so a phone-to-laptop handoff is
-		// paste, switch machine, copy. A real selection or a focused field keeps normal copy —
-		// silently hijacking Ctrl+C over selected text would lose what the user meant to take.
-		async copy_latest(event) {
-			const is_editable = ['INPUT', 'TEXTAREA'].includes(event.target?.tagName);
-			if (
-				is_editable ||
-				window.getSelection().toString() ||
-				!this.items.length
-			) {
-				return;
-			}
-			event.preventDefault();
-			await this.copy_item(this.items[0]);
-		},
-
-		async add_dropped_files(event) {
+		add_dropped_files(event) {
 			this.drag_depth = 0;
-			await this.upload_files([...(event.dataTransfer?.files || [])]);
+			this.stage_files([...(event.dataTransfer?.files || [])]);
 		},
 
-		async add_picked_files(event) {
+		add_picked_files(event) {
 			const picked_files = [...(event.target.files || [])];
 			event.target.value = '';
-			await this.upload_files(picked_files);
-		},
-
-		// Sequential, not Promise.all: each upload slides the room expiry and publishes a realtime
-		// ping, and every one of them counts against the per-room write rate limit.
-		async upload_files(files) {
-			for (const file of files) {
-				if (!this.is_allowed(file)) {
-					return;
-				}
-				await this.save_file(file);
-				if (this.error_message) {
-					return;
-				}
-			}
+			this.stage_files(picked_files);
 		},
 
 		// Checked here as well as on the server: an over-long body is rejected by Werkzeug before
@@ -253,15 +347,18 @@ document.addEventListener('alpine:init', () => {
 			await this.save_item('misc_helper.clipboard.api.add_text', {
 				room_name: this.room_name,
 				content,
+				sender: this.sender,
 			});
 		},
 
-		async save_file(file) {
+		async save_file(file, caption) {
 			const data_base64 = await get_base64(file);
 			await this.save_item('misc_helper.clipboard.api.add_file', {
 				room_name: this.room_name,
-				file_name: file.name || 'pasted-image.png',
+				file_name: file.name,
 				data_base64,
+				content: caption || '',
+				sender: this.sender,
 			});
 		},
 
@@ -278,6 +375,33 @@ document.addEventListener('alpine:init', () => {
 			}
 		},
 
+		async save_validity() {
+			this.error_message = '';
+			try {
+				const room = await call_api('misc_helper.clipboard.api.set_validity', {
+					room_name: this.room_name,
+					validity_hours: this.validity_hours,
+				});
+				this.set_expiry(room.expires_on);
+			} catch (error) {
+				this.error_message = error.message || this.labels.request_failed;
+			}
+		},
+
+		async toggle_pin(item) {
+			this.error_message = '';
+			try {
+				await call_api('misc_helper.clipboard.api.set_pinned', {
+					room_name: this.room_name,
+					item_name: item.name,
+					is_pinned: Number(item.is_pinned) ? 0 : 1,
+				});
+				await this.refresh_room();
+			} catch (error) {
+				this.error_message = error.message || this.labels.request_failed;
+			}
+		},
+
 		async delete_item(item) {
 			this.error_message = '';
 			try {
@@ -289,6 +413,24 @@ document.addEventListener('alpine:init', () => {
 			} catch (error) {
 				this.error_message = error.message || this.labels.request_failed;
 			}
+		},
+
+		// ---- copying -------------------------------------------------------------------------
+		//
+		// Ctrl+C with nothing selected copies the newest item, so a phone-to-laptop handoff is
+		// paste, switch machine, copy. A real selection or a focused field keeps normal copy —
+		// silently hijacking Ctrl+C over selected text would lose what the user meant to take.
+		async copy_latest(event) {
+			const is_editable = ['INPUT', 'TEXTAREA'].includes(event.target?.tagName);
+			if (
+				is_editable ||
+				window.getSelection().toString() ||
+				!this.items.length
+			) {
+				return;
+			}
+			event.preventDefault();
+			await this.copy_item(this.items[0]);
 		},
 
 		async copy_item(item) {
@@ -333,8 +475,61 @@ document.addEventListener('alpine:init', () => {
 			}
 			return `${item.file_name} · ${format_bytes(item.file_size)}`;
 		},
+
+		get is_dragging() {
+			return this.drag_depth > 0;
+		},
 	}));
 });
+
+// localStorage throws outright in some contexts — a private window, a browser set to block site
+// data, a thumbnail capture — so every read and write goes through these and the page renders
+// correctly with nothing stored. The sidebar is a convenience, never state the room depends on.
+function read_storage(key, fallback) {
+	try {
+		const raw = window.localStorage.getItem(key);
+		return raw ? JSON.parse(raw) : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+function write_storage(key, value) {
+	try {
+		window.localStorage.setItem(key, JSON.stringify(value));
+	} catch {
+		// Nothing to recover: the room itself is entirely server-side.
+	}
+}
+
+function load_rooms() {
+	const rooms = read_storage(ROOMS_STORAGE_KEY, []);
+	if (!Array.isArray(rooms)) {
+		return [];
+	}
+	// Anything the user could have hand-edited in devtools lands here, so rebuild each entry
+	// rather than trusting its shape.
+	return rooms
+		.filter((room) => room && typeof room.slug === 'string' && room.slug)
+		.map((room) => ({
+			slug: room.slug,
+			label:
+				typeof room.label === 'string' && room.label ? room.label : room.slug,
+			opened_at: Number(room.opened_at) || 0,
+		}));
+}
+
+function get_or_create_sender() {
+	const stored = read_storage(SENDER_STORAGE_KEY, '');
+	if (typeof stored === 'string' && SENDER_PATTERN.test(stored)) {
+		return stored;
+	}
+	const sender = [...crypto.getRandomValues(new Uint8Array(16))]
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('');
+	write_storage(SENDER_STORAGE_KEY, sender);
+	return sender;
+}
 
 // A plain fetch, not frappe.call: on website pages frappe.call resolves to the lightweight
 // frappe/website/js/website.js implementation (not the desk request.js), whose process_response

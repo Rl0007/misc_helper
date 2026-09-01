@@ -44,7 +44,12 @@ use_json_request_body = True
 # app_include_js = "/assets/misc_helper/js/misc_helper.js"
 
 # include js, css files in header of web template
-web_include_css = "/assets/misc_helper/css/clipboard.css"
+# The ?v= is not decoration. bundled_asset() only content-hashes real *.bundle.css files, and
+# this one is built by the Tailwind CLI instead, so it ships with no cache-busting at all --
+# browsers happily serve a stale copy across deploys. A stale stylesheet here is not a cosmetic
+# problem: the clipboard room's responsive show/hide depends on rules whose cascade order changed,
+# so an old file silently shows desktop users the mobile chrome. Bump on every CSS change.
+web_include_css = "/assets/misc_helper/css/clipboard.css?v=2"
 # web_include_css = "/assets/misc_helper/css/misc_helper.css"
 # web_include_js = "/assets/misc_helper/js/misc_helper.js"
 

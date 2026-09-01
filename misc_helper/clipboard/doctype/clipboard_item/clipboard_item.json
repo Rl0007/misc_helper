@@ -6,12 +6,14 @@
  "engine": "InnoDB",
  "field_order": [
   "clipboard",
+  "sender",
   "item_type",
   "content",
   "file_type",
   "file_url",
   "file_name",
-  "file_size"
+  "file_size",
+  "is_pinned"
  ],
  "fields": [
   {
@@ -32,6 +34,7 @@
    "reqd": 1
   },
   {
+   "description": "Text items: the message. File items: the caption shown under the file.",
    "fieldname": "content",
    "fieldtype": "Long Text",
    "ignore_xss_filter": 1,
@@ -57,6 +60,19 @@
    "fieldname": "file_type",
    "fieldtype": "Data",
    "label": "File Type"
+  },
+  {
+   "description": "Opaque per-browser id, compared to decide which side of the chat an item sits on. Never rendered.",
+   "fieldname": "sender",
+   "fieldtype": "Data",
+   "label": "Sender"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_pinned",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Pinned"
   }
  ],
  "grid_page_length": 50,

@@ -18,6 +18,7 @@ from misc_helper.clipboard.api import (
 	get_room,
 	get_room_validity_hours,
 	get_settings,
+	set_pinned,
 	set_validity,
 )
 from misc_helper.clipboard.test_base import ClipboardTestBase
@@ -450,6 +451,129 @@ class TestAddFile(ClipboardTestBase):
 		self.assertFalse(os.path.exists(on_disk_path))
 
 
+class TestSender(ClipboardTestBase):
+	"""The sender is an opaque per-browser id used only to pick a side of the chat. It proves
+	nothing and grants nothing -- knowing the room name already grants everything (spec §5)."""
+
+	SENDER = "a1b2c3d4e5f60718"
+
+	def test_sender_round_trips_on_both_write_endpoints(self):
+		room_name = self.make_room_name()
+
+		text_item = add_text(room_name, "hello", sender=self.SENDER)
+		file_item = add_file(room_name, "shot.png", self.encode(self.make_image_bytes()), sender=self.SENDER)
+
+		self.assertEqual(text_item["sender"], self.SENDER)
+		self.assertEqual(file_item["sender"], self.SENDER)
+
+	def test_a_malformed_sender_is_dropped_rather_than_rejected(self):
+		"""A client that sends nothing usable must still be able to post -- it just does not get
+		to claim a side of the chat."""
+		room_name = self.make_room_name()
+
+		for bad_sender in (None, "", "not-a-valid-id", "<script>", "z" * 20, "ab"):
+			with self.subTest(sender=bad_sender):
+				item = add_text(room_name, f"posted with {bad_sender!r}", sender=bad_sender)
+				self.assertEqual(item["sender"], "")
+
+	def test_sender_is_normalised_to_lowercase(self):
+		room_name = self.make_room_name()
+
+		item = add_text(room_name, "hello", sender=self.SENDER.upper())
+
+		self.assertEqual(item["sender"], self.SENDER)
+
+
+class TestCaption(ClipboardTestBase):
+	def test_file_carries_a_caption(self):
+		room_name = self.make_room_name()
+
+		item = add_file(room_name, "shot.png", self.encode(self.make_image_bytes()), content="look at this")
+
+		self.assertEqual(item["content"], "look at this")
+		self.assertEqual(item["item_type"], "Image")
+
+	def test_caption_is_optional_and_normalised_to_empty(self):
+		room_name = self.make_room_name()
+
+		for caption in (None, "", "   "):
+			with self.subTest(caption=caption):
+				item = add_file(room_name, "shot.png", self.encode(self.make_image_bytes()), content=caption)
+				self.assertEqual(item["content"], "")
+
+	def test_oversized_caption_is_rejected_and_no_file_is_stored(self):
+		room_name = self.make_room_name()
+
+		with self.temporary_settings(max_text_size_kb=1):
+			self.assertRaises(
+				frappe.ValidationError,
+				add_file,
+				room_name,
+				"shot.png",
+				self.encode(self.make_image_bytes()),
+				"x" * 2048,
+			)
+
+		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 0)
+		self.assertFalse(
+			frappe.db.exists("File", {"attached_to_doctype": "Clipboard Item", "attached_to_name": room_name})
+		)
+
+	def test_caption_round_trips_byte_for_byte(self):
+		"""add_file is xss_safe, so nothing bleaches the caption on the way in and render-time
+		escaping is the only defence. This pins the storage half of that bargain."""
+		room_name = self.make_room_name()
+		caption = "<script>alert(1)</script> & <ok> a < b"
+
+		item = add_file(room_name, "shot.png", self.encode(self.make_image_bytes()), content=caption)
+
+		self.assertEqual(item["content"], caption)
+		self.assertEqual(frappe.db.get_value("Clipboard Item", item["name"], "content"), caption)
+
+
+class TestPinning(ClipboardTestBase):
+	def test_pin_and_unpin_round_trip(self):
+		room_name = self.create_room()
+		item_name = self.create_text_item(room_name)
+
+		set_pinned(room_name, item_name, True)
+		self.assertEqual(cint(frappe.db.get_value("Clipboard Item", item_name, "is_pinned")), 1)
+
+		set_pinned(room_name, item_name, False)
+		self.assertEqual(cint(frappe.db.get_value("Clipboard Item", item_name, "is_pinned")), 0)
+
+	def test_pinning_does_not_slide_the_room_expiry(self):
+		"""A pin is not new content. Letting it slide the expiry would keep a room alive
+		indefinitely without anybody adding anything to it."""
+		room_name = self.create_room()
+		item_name = self.create_text_item(room_name)
+		expires_on = frappe.db.get_value("Clipboard", room_name, "expires_on")
+
+		set_pinned(room_name, item_name, True)
+
+		self.assertEqual(frappe.db.get_value("Clipboard", room_name, "expires_on"), expires_on)
+
+	def test_pinning_an_item_from_another_room_is_refused(self):
+		first_room = self.create_room(prefix="first")
+		second_room = self.create_room(prefix="second")
+		item_name = self.create_text_item(second_room)
+
+		self.assertRaises(frappe.PermissionError, set_pinned, first_room, item_name, True)
+
+		self.assertEqual(cint(frappe.db.get_value("Clipboard Item", item_name, "is_pinned")), 0)
+
+	def test_pinned_state_is_returned_by_get_room(self):
+		room_name = self.create_room()
+		pinned_name = self.create_text_item(room_name, "pinned")
+		self.create_text_item(room_name, "ordinary")
+		set_pinned(room_name, pinned_name, True)
+
+		items = {item["name"]: item["is_pinned"] for item in get_room(room_name)["items"]}
+
+		self.assertEqual(cint(items[pinned_name]), 1)
+		self.assertEqual(sum(cint(value) for value in items.values()), 1)
+
+
 class TestGuestAccess(ClipboardTestBase):
 	def test_guest_can_read_and_write_a_room(self):
 		room_name = self.make_room_name()
@@ -537,26 +661,28 @@ class TestWhitelisting(ClipboardTestBase):
 	GET is caught."""
 
 	def test_endpoints_are_reachable_by_a_guest(self):
-		for method in (get_room, add_text, add_file, delete_item, set_validity):
+		for method in (get_room, add_text, add_file, delete_item, set_validity, set_pinned):
 			with self.subTest(method=method.__name__), self.set_user("Guest"):
 				frappe.is_whitelisted(method)
 
 	def test_writes_are_post_only_and_reads_are_not(self):
-		for method in (add_text, add_file, delete_item, set_validity):
+		for method in (add_text, add_file, delete_item, set_validity, set_pinned):
 			with self.subTest(method=method.__name__):
 				self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ("POST",))
 
 		self.assertIn("GET", frappe.allowed_http_methods_for_whitelisted_func[get_room])
 
-	def test_only_add_text_is_xss_safe(self):
+	def test_only_the_free_text_endpoints_are_xss_safe(self):
 		"""For a Guest caller is_whitelisted bleaches every string in form_dict before the body
-		runs. add_text stores what was pasted, so it must opt out; nothing else may, because
+		runs. The two endpoints that store what was typed must opt out; nothing else may, because
 		xss_safe makes render-time escaping the only remaining defence."""
-		self.assertIn(add_text, frappe.xss_safe_methods)
+		for method in (add_text, add_file):
+			with self.subTest(method=method.__name__):
+				self.assertIn(method, frappe.xss_safe_methods)
 
-		# Deliberate: none of these takes free text -- room_name and file_name are re-derived
-		# through strict filters, item_name is a hash id, base64 has nothing to sanitise.
-		for method in (get_room, add_file, delete_item, set_validity):
+		# Deliberate: none of these takes free text -- room_name is re-derived through a strict
+		# filter, item_name is a hash id, the rest are numbers.
+		for method in (get_room, delete_item, set_validity, set_pinned):
 			with self.subTest(method=method.__name__):
 				self.assertNotIn(method, frappe.xss_safe_methods)
 

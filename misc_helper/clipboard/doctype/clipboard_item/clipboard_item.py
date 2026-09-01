@@ -20,7 +20,9 @@ class ClipboardItem(Document):
 		file_size: DF.Int
 		file_type: DF.Data | None
 		file_url: DF.Data | None
+		is_pinned: DF.Check
 		item_type: DF.Literal["Text", "Image", "File"]
+		sender: DF.Data | None
 	# end: auto-generated types
 
 	_DOCTYPE_NAME = "Clipboard Item"

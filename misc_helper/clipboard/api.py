@@ -77,6 +77,12 @@ FILE_TYPE_FAMILIES = {
 
 FILE_TYPE_EXTENSION_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
 
+# An opaque id the browser generates for itself and stores locally. It is only ever compared
+# against itself to decide which side of the chat an item sits on -- never rendered, never treated
+# as proof of anything. Anyone can send any value; that is fine, because it grants nothing that
+# knowing the room name did not already grant (spec §5).
+SENDER_PATTERN = re.compile(r"^[a-f0-9]{16,64}$")
+
 # Fallbacks for when the matching Clipboard Settings field is blank or zero.
 DEFAULT_VALIDITY_HOURS = 24
 DEFAULT_MAX_VALIDITY_HOURS = 168
@@ -91,6 +97,8 @@ JSON_ENVELOPE_BYTES = 4096
 ITEM_FIELDS = (
 	"name",
 	"item_type",
+	"sender",
+	"is_pinned",
 	"content",
 	"file_type",
 	"file_url",
@@ -136,7 +144,7 @@ def get_room(room_name: str) -> dict:
 # feature's entire user base. Never interpolate `content` unescaped into a template.
 @frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
-def add_text(room_name: str, content: str) -> dict:
+def add_text(room_name: str, content: str, sender: str | None = None) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
 
@@ -155,6 +163,7 @@ def add_text(room_name: str, content: str) -> dict:
 	item.clipboard = room_name
 	item.item_type = "Text"
 	item.content = content
+	item.sender = get_valid_sender(sender)
 	# The room name is the only credential this product has; §5 of the spec makes that the trust
 	# model, so the guest API authorizes and the doctype stays closed to the desk.
 	item.insert(ignore_permissions=True)
@@ -163,12 +172,22 @@ def add_text(room_name: str, content: str) -> dict:
 	return get_item_data(item)
 
 
-# No xss_safe here, deliberately: this endpoint takes no free text. room_name and file_name are
-# re-derived through strict patterns below, and base64 has no character sanitize_html would touch,
-# so the guest form_dict sanitiser is a free extra layer. Same reasoning for get_room/delete_item.
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+# xss_safe, for the same reason add_text is: `content` is the caption, and for a Guest caller
+# is_whitelisted (frappe/__init__.py:649) bleach-sanitises every string in form_dict before this
+# body runs, which would corrupt it. Escaping at render time is therefore the ONLY XSS defence for
+# this endpoint's arguments -- never interpolate `content` or `file_name` unescaped into a
+# template. The flag costs nothing for the other arguments: room_name and file_name are re-derived
+# through strict patterns below, sender through SENDER_PATTERN, and base64 has no character
+# sanitize_html would touch.
+@frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
-def add_file(room_name: str, file_name: str, data_base64: str) -> dict:
+def add_file(
+	room_name: str,
+	file_name: str,
+	data_base64: str,
+	content: str | None = None,
+	sender: str | None = None,
+) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
 
@@ -184,6 +203,8 @@ def add_file(room_name: str, file_name: str, data_base64: str) -> dict:
 	item = frappe.new_doc("Clipboard Item")
 	item.clipboard = room_name
 	item.item_type = "Image" if file_type in IMAGE_FILE_TYPES else "File"
+	item.content = get_valid_caption(content, settings)
+	item.sender = get_valid_sender(sender)
 	item.file_type = file_type
 	item.file_name = get_display_file_name(file_name, file_type)
 	item.file_size = len(file_bytes)
@@ -227,14 +248,26 @@ def add_file(room_name: str, file_name: str, data_base64: str) -> dict:
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def delete_item(room_name: str, item_name: str) -> None:
 	room_name = get_valid_room_name(room_name)
-
-	# Never trust the item name alone: a guest holding one room's name must not reach another's.
-	owning_room = frappe.db.get_value("Clipboard Item", cstr(item_name), "clipboard")
-	if owning_room != room_name:
-		frappe.throw(_("This item does not belong to room {0}.").format(room_name), frappe.PermissionError)
+	validate_item_belongs_to_room(room_name, item_name)
 
 	frappe.delete_doc("Clipboard Item", item_name, ignore_permissions=True, delete_permanently=True)
 	save_write(room_name)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
+def set_pinned(room_name: str, item_name: str, is_pinned: bool) -> dict:
+	"""Pin or unpin one item. The pin is shared -- everyone in the room sees it."""
+	room_name = get_valid_room_name(room_name)
+	validate_item_belongs_to_room(room_name, item_name)
+
+	is_pinned = cint(is_pinned)
+	frappe.db.set_value("Clipboard Item", item_name, "is_pinned", is_pinned, update_modified=False)
+	# Deliberately NOT save_write: pinning is not new content, so it must not slide the room's
+	# expiry. It still pings viewers so the pin appears everywhere at once.
+	publish_room_change(room_name)
+
+	return {"name": item_name, "is_pinned": is_pinned}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -265,6 +298,37 @@ def set_validity(room_name: str, validity_hours: int) -> dict:
 		"validity_hours": validity_hours,
 		"expires_on": cstr(frappe.db.get_value("Clipboard", room_name, "expires_on")),
 	}
+
+
+def validate_item_belongs_to_room(room_name: str, item_name: str) -> None:
+	"""Never trust the item name alone: a guest holding one room's name must not reach another's."""
+	owning_room = frappe.db.get_value("Clipboard Item", cstr(item_name), "clipboard")
+	if owning_room != room_name:
+		frappe.throw(_("This item does not belong to room {0}.").format(room_name), frappe.PermissionError)
+
+
+def get_valid_sender(sender: str | None) -> str:
+	"""Keep a well-formed browser id, drop anything else rather than throwing.
+
+	Dropping beats rejecting: the id decides only which side of the chat a bubble sits on, so a
+	client that sends nothing (or something odd) should still be able to post -- it just does not
+	get to claim a side.
+	"""
+	sender = cstr(sender).strip().lower()
+
+	return sender if SENDER_PATTERN.match(sender) else ""
+
+
+def get_valid_caption(content: str | None, settings: "ClipboardSettings") -> str:
+	content = cstr(content).strip()
+	if not content:
+		return ""
+
+	max_text_size_kb = cint(settings.max_text_size_kb)
+	if len(content.encode()) > max_text_size_kb * 1024:
+		frappe.throw(_("Caption is larger than the {0} KB limit.").format(max_text_size_kb))
+
+	return content
 
 
 def get_valid_room_name(room_name: str) -> str:
@@ -361,6 +425,10 @@ def save_write(room_name: str) -> None:
 		{"expires_on": get_expiry(room_name), "last_activity": now_datetime()},
 		update_modified=False,
 	)
+	publish_room_change(room_name)
+
+
+def publish_room_change(room_name: str) -> None:
 	# The payload stays empty on purpose: the website room broadcasts to every socket on the
 	# site, so it may never carry content. Clients re-fetch through get_room, which authorizes.
 	#

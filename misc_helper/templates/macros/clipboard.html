@@ -25,9 +25,94 @@
 <svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M3.5 14.5v1A1.5 1.5 0 0 0 5 17h10a1.5 1.5 0 0 0 1.5-1.5v-1"/></svg>
 {%- elif name == "film" -%}
 <svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M7 4v12M13 4v12M3 10h14"/></svg>
+{%- elif name == "pin" -%}
+<svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12.5 2.5l5 5-2 1-1.5 4.5-5-5L13.5 6.5l-1-4z"/><path d="M9 11l-4.5 4.5"/></svg>
+{%- elif name == "menu" -%}
+<svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/></svg>
+{%- elif name == "pencil" -%}
+<svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 3.5l3 3L7 16H4v-3z"/></svg>
+{%- elif name == "close" -%}
+<svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+{%- elif name == "plus" -%}
+<svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
 {%- elif name == "arrow-right" -%}
 <svg class="{{ class_names }}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
 {%- endif -%}
+{%- endmacro -%}
+
+{# One chat bubble, driven entirely by the Alpine `item` in scope. A macro rather than a
+   Jinja include: Frappe's loader resolves "templates/<name>" across EVERY installed app with no
+   per-app namespacing, so a partial named anything generic can be silently won or lost by another
+   app on the same site (this app has already been bitten by that -- see CLAUDE.md). #}
+{%- macro item_bubble() -%}
+<div class="flex" :class="is_mine(item) ? 'justify-end' : 'justify-start'">
+	<div
+		class="cb-card max-w-[85%] min-w-0 p-3"
+		:class="is_mine(item) ? 'bg-surface-subtle' : ''"
+	>
+		<template x-if="item.item_type === 'Image'">
+			<a :href="item.file_url" target="_blank" rel="noopener">
+				<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle" @load="on_media_load()">
+			</a>
+		</template>
+		<template x-if="item.item_type === 'File' && is_video(item)">
+			<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" :src="item.file_url" @loadedmetadata="on_media_load()"></video>
+		</template>
+		<template x-if="item.item_type === 'File' && !is_video(item)">
+			<a class="cb-btn cb-btn-secondary max-w-full" :href="item.file_url" download>
+				{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
+				<span class="truncate" x-text="item.file_name"></span>
+			</a>
+		</template>
+
+		{# x-text, never x-html: add_text and add_file are xss_safe, so nothing bleaches this on
+		   the way in and escaping here is the only remaining XSS defence. #}
+		<template x-if="item.content">
+			<pre
+				class="m-0 max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong"
+				:class="item.item_type === 'Text' ? '' : 'mt-2'"
+				x-text="item.content"
+			></pre>
+		</template>
+
+		<div class="mt-2 flex items-center justify-between gap-2">
+			<span class="flex min-w-0 items-center gap-1 truncate text-xs text-ink-muted">
+				<span x-show="Number(item.is_pinned)" x-cloak>{{ icon("pin", "w-3 h-3 shrink-0") }}</span>
+				<span class="truncate" x-text="format_item_meta(item)"></span>
+			</span>
+			<div class="flex shrink-0 items-center gap-1.5">
+				<button
+					type="button"
+					class="cb-icon-btn !h-8 !w-8"
+					:class="Number(item.is_pinned) ? '!border-outline-strong !text-ink-strong' : ''"
+					@click="toggle_pin(item)"
+				>
+					{{ icon("pin", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Pin") }}</span>
+				</button>
+				<button
+					type="button"
+					class="cb-btn cb-btn-secondary !h-8 px-2.5 py-0 text-xs"
+					:class="copied_item_name === item.name ? '!border-outline-success !text-ink-success' : ''"
+					@click="copy_item(item)"
+				>
+					<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
+					<span x-show="copied_item_name === item.name" x-cloak>{{ icon("check", "w-3.5 h-3.5") }}</span>
+					<span x-show="copied_item_name !== item.name">{{ _("Copy") }}</span>
+					<span x-show="copied_item_name === item.name" x-cloak>{{ _("Copied") }}</span>
+				</button>
+				<button
+					type="button"
+					class="cb-icon-btn cb-icon-btn-danger !h-8 !w-8"
+					@click="delete_item(item)"
+				>
+					{{ icon("trash", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Delete") }}</span>
+				</button>
+			</div>
+		</div>
+	</div>
+</div>
 {%- endmacro -%}
 
 {# The room URL is the only credential a room has, so the naming convention IS the
