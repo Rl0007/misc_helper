@@ -98,6 +98,7 @@ ITEM_FIELDS = (
 	"name",
 	"item_type",
 	"sender",
+	"sender_kind",
 	"is_pinned",
 	"content",
 	"file_type",

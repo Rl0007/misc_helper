@@ -175,6 +175,46 @@ Single row already exists and `migrate` leaves it **NULL** — the JSON says `"d
 the site reads `None`. Seed it with a patch, and have the code fall back to a module constant so a
 blank never silently means zero.
 
+## Bootstrap owns `.bg-primary` and friends, with `!important`
+
+Frappe's `website.bundle.css` ships Bootstrap's contextual utilities — `.bg-primary`,
+`.text-primary`, `.border-primary` and the same for secondary/success/danger/warning/info — as
+**hardcoded colours with `!important`** (`.bg-primary { background-color: #171717 !important }`).
+Any design system whose semantic tokens use those bare names (Penguin UI does) silently loses
+every one of them on a portal page, and the failure is invisible in the class list.
+
+Only the BARE names collide: `bg-danger/40` generates a different class and is safe, as is
+`text-on-primary`. `web_include_css` is injected after the bundle, so Tailwind's important
+modifier (`bg-primary!`) wins on source order. Grep the built bundle before assuming a name is
+free:
+`python3 -c "import re;print(re.search(r'\.bg-primary\s*\{[^}]*\}', open(PATH).read()))"`
+
+## The Tailwind-built stylesheet has no cache-busting
+
+`bundled_asset()` only content-hashes real `*.bundle.css` files. A stylesheet built by the
+Tailwind CLI and referenced from `web_include_css` ships with none, so browsers serve a stale copy
+across deploys — and a stale stylesheet is not cosmetic here, since the cascade fixes below live
+in it. Put a `?v=N` on the `web_include_css` path and bump it on every CSS change. **While
+developing, a changed class that "does nothing" is almost always this, not your markup.**
+
+## Component CSS must be emitted BEFORE Tailwind's utilities
+
+Hand-written component classes have to stay unlayered to beat Frappe's own unlayered bundle — put
+them in `@layer components` and Bootstrap's button rules flatten them. But unlayered also means
+source order decides against Tailwind's utilities, so emitting them *after* the utilities lets
+`.my-button { display: inline-flex }` silently defeat `md:hidden`, and responsive show/hide stops
+working with no error. Import them before `tailwindcss/utilities.css`; it is the only position
+where both hold.
+
+## No preflight means Bootstrap still styles bare elements
+
+Preflight is not imported (it strips Frappe's navbar/footer), so Bootstrap's own `pre`, `a`, `h1`
+and list rules survive. A class beats them on specificity, but only if you write one: `pre` inside
+a coloured bubble keeps Bootstrap's near-black and vanishes unless you add `text-inherit`, and an
+`h1` keeps its margins and drops off its row unless you add `m-0`. Every macro carries its own
+resets, and this looks fine in isolation — it breaks only on a page that also loads the bundle,
+which is every page in production.
+
 ## Committing from a read path
 
 Never call `frappe.db.commit()` in a GET handler — it commits the caller's entire ambient

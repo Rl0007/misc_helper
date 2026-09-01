@@ -22,7 +22,7 @@ def get_context(context):
 	context.accept_attribute = ",".join(f".{file_type.lower()}" for file_type in room["allowed_file_types"])
 	context.labels = get_labels()
 	context.title = room["room_name"]
-	context.body_class = "bg-surface-base"
+	context.body_class = "bg-surface"
 	context.no_cache = 1
 
 
@@ -71,4 +71,6 @@ def get_labels() -> dict:
 		"type_not_allowed": _("Files of type {0} are not accepted in a clipboard room."),
 		"file_too_large": _("That file is {0}. The limit is {1}."),
 		"no_extension": _("Give the file a name with an extension, like clip.mp4."),
+		"draft_placeholder": _("Type, paste, or drop a file"),
+		"caption_placeholder": _("Add a caption, or just send"),
 	}

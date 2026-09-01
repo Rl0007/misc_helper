@@ -7,6 +7,7 @@
  "field_order": [
   "clipboard",
   "sender",
+  "sender_kind",
   "item_type",
   "content",
   "file_type",
@@ -73,6 +74,14 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Is Pinned"
+  },
+  {
+   "default": "Human",
+   "description": "Drives which avatar family the bubble draws, so a model's message is never mistakable for a person's.",
+   "fieldname": "sender_kind",
+   "fieldtype": "Select",
+   "label": "Sender Kind",
+   "options": "Human\nAgent"
   }
  ],
  "grid_page_length": 50,

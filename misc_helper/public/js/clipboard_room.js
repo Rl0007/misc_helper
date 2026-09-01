@@ -2,6 +2,12 @@ const SENDER_STORAGE_KEY = 'clipboard_sender';
 const ROOMS_STORAGE_KEY = 'clipboard_rooms';
 const SENDER_PATTERN = /^[a-f0-9]{16,64}$/;
 
+const DICEBEAR_BASE = 'https://api.dicebear.com/9.x';
+// Deliberately different families, not different seeds: a message from a model must never be
+// mistakable for a person's at a glance.
+const HUMAN_AVATAR_STYLE = 'thumbs';
+const AGENT_AVATAR_STYLE = 'bottts';
+
 document.addEventListener('alpine:init', () => {
 	Alpine.data('clipboard_room', (context) => ({
 		room_name: context.room.room_name,
@@ -115,6 +121,26 @@ document.addEventListener('alpine:init', () => {
 		// ---- chat sides ----------------------------------------------------------------------
 		is_mine(item) {
 			return !!item.sender && item.sender === this.sender;
+		},
+
+		// The seed is the opaque sender id, so one browser always draws the same face without
+		// anything about it being stored or displayed. An item with no sender (posted by an older
+		// client, or with a malformed id) still gets a stable face from its own item name rather
+		// than every such item sharing one.
+		//
+		// ponytail: this hits api.dicebear.com from the viewer's browser, so DiceBear sees that
+		// somebody is in some room -- a third-party request on a tool whose pitch is that
+		// third-party clipboard sites are untrusted. It carries no room name and no content.
+		// Switch to the self-hosted @dicebear packages, rendered server-side, if that stops being
+		// an acceptable trade.
+		avatar_url(sender, kind) {
+			// The doctype stores it title-cased ("Human" / "Agent").
+			const style =
+				String(kind).toLowerCase() === 'agent'
+					? AGENT_AVATAR_STYLE
+					: HUMAN_AVATAR_STYLE;
+			const seed = sender || 'anonymous';
+			return `${DICEBEAR_BASE}/${style}/svg?seed=${encodeURIComponent(seed)}`;
 		},
 
 		// ---- item grouping ---------------------------------------------------------------------
@@ -534,8 +560,8 @@ function get_or_create_sender() {
 // A plain fetch, not frappe.call: on website pages frappe.call resolves to the lightweight
 // frappe/website/js/website.js implementation (not the desk request.js), whose process_response
 // unconditionally pops its own desk-style "Message" dialog for any _server_messages — with no
-// `silent` escape hatch — which is jarring on this bare page and duplicates the inline .cb-alert
-// below. Doing the request ourselves keeps that dialog from ever firing.
+// `silent` escape hatch — which is jarring on this bare page and duplicates the alert shown
+// above the composer. Doing the request ourselves keeps that dialog from ever firing.
 async function call_api(method, args) {
 	const response = await fetch(`/api/method/${method}`, {
 		method: 'POST',

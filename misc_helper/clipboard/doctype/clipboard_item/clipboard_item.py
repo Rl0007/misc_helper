@@ -23,6 +23,7 @@ class ClipboardItem(Document):
 		is_pinned: DF.Check
 		item_type: DF.Literal["Text", "Image", "File"]
 		sender: DF.Data | None
+		sender_kind: DF.Literal["Human", "Agent"]
 	# end: auto-generated types
 
 	_DOCTYPE_NAME = "Clipboard Item"

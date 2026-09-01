@@ -1,155 +1,50 @@
-/* Clipboard component classes. Imported by clipboard.css BEFORE tailwindcss/utilities.css,
- * and that order is load-bearing.
+/* The last hand-written CSS for the clipboard pages. Everything else is now a Penguin UI
+ * derived macro built from utilities (see misc_helper/templates/macros/clipboard/ui.html).
  *
- * These must stay UNLAYERED so they beat Frappe's own unlayered bundle -- put them in
- * @layer components and Bootstrap's button rules flatten every .cb-btn back to square corners.
- * But unlayered also means source order decides against Tailwind's utilities, so emitting them
- * after the utilities lets `.cb-icon-btn { display: inline-flex }` silently defeat `md:hidden`
- * and responsive show/hide stops working. Before the utilities is the only position where both
- * hold. */
+ * Imported by clipboard.css BEFORE tailwindcss/utilities.css, and that order is load-bearing:
+ * these must stay UNLAYERED to beat Frappe's own unlayered bundle, but emitting them after the
+ * utilities would let them defeat responsive utilities like `md:hidden`. Before is the only
+ * position where both hold.
+ */
 
-/* Scopes InterVariable (already self-hosted by Frappe's website bundle — no extra font
-   request) to just the clipboard pages, not the site body: web_include_css loads on
-   every portal page, so a bare `body` font rule here would repaint the whole site. */
+/* Scopes InterVariable (already self-hosted by Frappe's website bundle -- no extra font request)
+ * to just the clipboard pages, not the site body: web_include_css loads on every portal page, so
+ * a bare `body` font rule here would repaint the whole site. */
 .cb-page {
 	font-family: InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Buttons. */
-.cb-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 0.5rem;
-	border-radius: var(--radius-cb-field);
-	padding: 0.5rem 1rem;
-	font-size: 0.875rem;
-	font-weight: 500;
-	border: 1px solid transparent;
-	box-shadow: var(--shadow-cb-xs);
-	transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.1s ease;
-}
-.cb-btn:active {
-	transform: scale(0.97);
-}
-.cb-btn:disabled {
-	box-shadow: none;
-	cursor: not-allowed;
-}
-.cb-btn-primary {
-	background-color: var(--color-surface-solid);
-	color: var(--color-ink-inverse);
-}
-.cb-btn-primary:not(:disabled):hover {
-	background-color: var(--color-surface-solid-hover);
-	box-shadow: var(--shadow-cb-sm);
-}
-.cb-btn-secondary {
-	background-color: var(--color-surface-card);
-	color: var(--color-ink-strong);
-	border-color: var(--color-outline-base);
-}
-.cb-btn-secondary:hover {
-	background-color: var(--color-surface-hover);
-	box-shadow: var(--shadow-cb-sm);
-}
-.cb-btn-danger {
-	background-color: var(--color-surface-card);
-	color: var(--color-ink-danger);
-	border-color: var(--color-outline-danger);
-	box-shadow: none;
-}
-.cb-btn-danger:hover {
-	background-color: var(--color-surface-danger);
+/* DiceBear returns a flat SVG, so the life has to come from CSS. Kept to a single short pop on
+ * mount plus a hover lift -- an avatar that animates continuously next to live-updating text is
+ * a distraction, not a delight. */
+.cb-avatar {
+	animation: cb-avatar-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	transition: transform 150ms ease;
 }
 
-/* Icon-only action button — copy/delete on each item row. */
-.cb-icon-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	height: 2rem;
-	width: 2rem;
-	border-radius: var(--radius-cb-field);
-	border: 1px solid var(--color-outline-base);
-	background-color: var(--color-surface-card);
-	color: var(--color-ink-strong);
-	transition: background-color 0.1s ease, box-shadow 0.1s ease;
-}
-.cb-icon-btn:hover {
-	background-color: var(--color-surface-hover);
-	box-shadow: var(--shadow-cb-xs);
-}
-.cb-icon-btn-danger {
-	border-color: var(--color-outline-danger);
-	color: var(--color-ink-danger);
-}
-.cb-icon-btn-danger:hover {
-	background-color: var(--color-surface-danger);
+.cb-avatar:hover {
+	transform: translateY(-2px) scale(1.06);
 }
 
-/* Text input / textarea. */
-.cb-field {
-	width: 100%;
-	border-radius: var(--radius-cb-field);
-	border: 1px solid var(--color-outline-base);
-	background-color: var(--color-surface-card);
-	padding: 0.625rem 0.75rem;
-	font-size: 1rem;
-	color: var(--color-ink-strong);
-	box-shadow: var(--shadow-cb-xs);
-	transition: border-color 0.1s ease, box-shadow 0.1s ease;
-}
-.cb-field::placeholder {
-	color: var(--color-ink-subtle);
-}
-.cb-field:focus {
-	outline: none;
-	border-color: var(--color-outline-focus);
-	box-shadow: var(--shadow-cb-sm);
+@keyframes cb-avatar-pop {
+	from {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
 }
 
-/* Card surface — the compose panel and each item row. */
-.cb-card {
-	border-radius: var(--radius-cb-card);
-	border: 1px solid var(--color-outline-subtle);
-	background-color: var(--color-surface-card);
-	box-shadow: var(--shadow-cb-xs);
-}
+/* Respect the OS setting -- this one is a genuine accessibility preference, unlike colour
+ * scheme, which Frappe owns through [data-theme]. */
+@media (prefers-reduced-motion: reduce) {
+	.cb-avatar {
+		animation: none;
+	}
 
-/* Pill chip — the expiry label and the per-item file-type caption. */
-.cb-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.375rem;
-	border-radius: 999px;
-	border: 1px solid var(--color-outline-subtle);
-	background-color: var(--color-surface-subtle);
-	padding: 0.25rem 0.625rem;
-	font-size: 0.75rem;
-	color: var(--color-ink-secondary);
-}
-
-/* Alert banner — the weak-name warning, and (with -danger) request-failure messages. */
-.cb-alert {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.5rem;
-	border-radius: var(--radius-cb-field);
-	border: 1px solid var(--color-outline-warning);
-	background-color: var(--color-surface-warning);
-	box-shadow: var(--shadow-cb-xs);
-	padding: 0.75rem;
-	font-size: 0.875rem;
-	color: var(--color-ink-warning);
-}
-.cb-alert-danger {
-	border-color: var(--color-outline-danger);
-	background-color: var(--color-surface-danger);
-	color: var(--color-ink-danger);
-}
-
-/* Alpine hides x-cloak elements until it boots; without this the raw markup flashes. */
-[x-cloak] {
-	display: none !important;
+	.cb-avatar:hover {
+		transform: none;
+	}
 }

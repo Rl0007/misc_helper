@@ -49,7 +49,7 @@ use_json_request_body = True
 # browsers happily serve a stale copy across deploys. A stale stylesheet here is not a cosmetic
 # problem: the clipboard room's responsive show/hide depends on rules whose cascade order changed,
 # so an old file silently shows desktop users the mobile chrome. Bump on every CSS change.
-web_include_css = "/assets/misc_helper/css/clipboard.css?v=2"
+web_include_css = "/assets/misc_helper/css/clipboard.css?v=6"
 # web_include_css = "/assets/misc_helper/css/misc_helper.css"
 # web_include_js = "/assets/misc_helper/js/misc_helper.js"
 

@@ -1,5 +1,6 @@
 {% extends "templates/clipboard_layout.html" %}
-{% from "templates/macros/clipboard.html" import icon, item_bubble, naming_advice %}
+{% from "templates/macros/clipboard.html" import icon, naming_advice %}
+{% from "templates/macros/clipboard/ui.html" import alert, avatar, button, chat_bubble, chip, icon_button, select, textarea %}
 
 {% block title %}{{ room.room_name | e }}{% endblock %}
 
@@ -15,13 +16,13 @@
    include_script() macro built on it) only content-hashes real *.bundle.js files, so a raw file
    like this gets no cache-busting for free. Without the ?v= query, browsers can keep serving a
    cached copy across deploys indefinitely; bump it whenever this file changes. #}
-<script defer src="/assets/misc_helper/js/clipboard_room.js?v=7"></script>
+<script defer src="/assets/misc_helper/js/clipboard_room.js?v=8"></script>
 <script defer src="/assets/misc_helper/js/alpine.min.js"></script>
 {% endblock %}
 
 {% block page_content %}
 <div
-	class="flex h-full text-ink-base"
+	class="flex h-full bg-surface text-on-surface"
 	x-data='clipboard_room({{ {"room": room, "expires_in_seconds": expires_in_seconds, "labels": labels, "video_file_types": video_file_types} | json | e }})'
 	@paste.window="add_from_paste($event)"
 	@keydown.window.ctrl.c="copy_latest($event)"
@@ -33,14 +34,14 @@
 >
 	{# Pointer-events off so the overlay never eats the drop it is advertising. #}
 	<div
-		class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-surface-base/85"
+		class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-surface/85"
 		x-show="is_dragging"
 		x-cloak
 	>
-		<div class="cb-card border-2 border-dashed px-8 py-6 text-center">
-			{{ icon("paperclip", "w-6 h-6 mx-auto text-ink-muted") }}
-			<p class="mt-2 text-sm font-medium text-ink-strong">{{ _("Drop to attach") }}</p>
-			<p class="mt-1 text-xs text-ink-muted">{{ allowed_file_types | join(" · ") | e }}</p>
+		<div class="rounded-radius border-2 border-dashed border-outline-strong bg-surface px-8 py-6 text-center">
+			{{ icon("paperclip", "w-6 h-6 mx-auto text-on-surface/60") }}
+			<p class="m-0 mt-2 text-sm font-medium text-on-surface-strong">{{ _("Drop to attach") }}</p>
+			<p class="m-0 mt-1 text-xs text-on-surface/60">{{ allowed_file_types | join(" · ") | e }}</p>
 		</div>
 	</div>
 
@@ -48,27 +49,28 @@
 	   Deliberately local. Rooms are public and guessable and the name IS the credential, so a
 	   server-side listing would hand every visitor a key to everyone else's rooms. #}
 	<div
-		class="fixed inset-0 z-30 bg-surface-base/60 md:hidden"
+		class="fixed inset-0 z-30 bg-surface/60 md:hidden"
 		x-show="show_sidebar"
 		x-cloak
 		@click="show_sidebar = false"
 	></div>
 
 	<aside
-		class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-outline-subtle bg-surface-card md:relative md:z-auto md:translate-x-0"
+		class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-outline bg-surface-alt transition-transform md:relative md:z-auto md:translate-x-0"
 		:class="show_sidebar ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
 		x-cloak
 	>
-		<div class="flex shrink-0 items-center gap-2 border-b border-outline-subtle px-3 py-2.5">
-			<p class="m-0 flex-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">{{ _("Your clipboards") }}</p>
-			<a href="/clipboard" class="cb-icon-btn !h-7 !w-7" title="{{ _('Open another room') }}">
+		<div class="flex shrink-0 items-center gap-1 border-b border-outline px-3 py-2.5">
+			<p class="m-0 flex-1 text-xs font-semibold tracking-wide text-on-surface/60 uppercase">{{ _("Your clipboards") }}</p>
+			<a
+				href="/clipboard"
+				class="inline-flex size-7 items-center justify-center rounded-radius text-on-surface no-underline transition hover:bg-surface"
+				title="{{ _('Open another room') }}"
+			>
 				{{ icon("plus", "w-3.5 h-3.5") }}
 				<span class="sr-only">{{ _("Open another room") }}</span>
 			</a>
-			<button type="button" class="cb-icon-btn !h-7 !w-7 md:hidden" @click="show_sidebar = false">
-				{{ icon("close", "w-3.5 h-3.5") }}
-				<span class="sr-only">{{ _("Close") }}</span>
-			</button>
+			{{ icon_button(icon("close", "w-3.5 h-3.5"), _("Close"), classes="!size-7 md:hidden", attrs='@click="show_sidebar = false"') }}
 		</div>
 
 		<div class="relative min-h-0 flex-1 overflow-y-auto p-2">
@@ -76,13 +78,13 @@
 				<template x-for="entry in rooms" :key="entry.slug">
 					<li>
 						<div
-							class="group flex items-center gap-1 rounded-lg px-2 py-1.5"
-							:class="entry.slug === room_name ? 'bg-surface-hover' : 'hover:bg-surface-subtle'"
+							class="group flex items-center gap-1 rounded-radius px-2 py-1.5 transition"
+							:class="entry.slug === room_name ? 'bg-surface' : 'hover:bg-surface/60'"
 						>
 							<template x-if="renaming_slug !== entry.slug">
 								<a
 									class="min-w-0 flex-1 truncate text-sm no-underline"
-									:class="entry.slug === room_name ? 'font-medium text-ink-strong' : 'text-ink-secondary'"
+									:class="entry.slug === room_name ? 'font-medium text-on-surface-strong' : 'text-on-surface'"
 									:href="`/clipboard/${entry.slug}`"
 									:title="entry.slug"
 									x-text="entry.label"
@@ -92,7 +94,7 @@
 								{# The slug is the address and never changes; this only renames the
 								   local label, so the room stays reachable by the name you say. #}
 								<input
-									class="cb-field !h-7 min-w-0 flex-1 !py-0 text-sm"
+									class="min-w-0 flex-1 rounded-radius border border-outline bg-surface px-2 py-0.5 text-sm text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong"
 									x-model="rename_draft"
 									:x-ref="`rename_${entry.slug}`"
 									@keydown.enter.prevent="save_rename()"
@@ -100,29 +102,15 @@
 									@blur="save_rename()"
 								>
 							</template>
-							<button
-								type="button"
-								class="cb-icon-btn !h-6 !w-6 shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
-								x-show="renaming_slug !== entry.slug"
-								@click.prevent="start_rename(entry)"
-							>
-								{{ icon("pencil", "w-3 h-3") }}
-								<span class="sr-only">{{ _("Rename") }}</span>
-							</button>
-							<button
-								type="button"
-								class="cb-icon-btn !h-6 !w-6 shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100"
-								x-show="renaming_slug !== entry.slug"
-								@click.prevent="forget_room(entry)"
-							>
-								{{ icon("close", "w-3 h-3") }}
-								<span class="sr-only">{{ _("Remove from this list") }}</span>
-							</button>
+							<span class="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100" x-show="renaming_slug !== entry.slug">
+								{{ icon_button(icon("pencil", "w-3 h-3"), _("Rename"), classes="!size-6", attrs='@click.prevent="start_rename(entry)"') }}
+								{{ icon_button(icon("close", "w-3 h-3"), _("Remove from this list"), classes="!size-6", attrs='@click.prevent="forget_room(entry)"') }}
+							</span>
 						</div>
 					</li>
 				</template>
 			</ul>
-			<p class="mt-3 px-2 text-xs leading-relaxed text-ink-subtle">
+			<p class="m-0 mt-3 px-2 text-xs leading-relaxed text-on-surface/50">
 				{{ _("This list and any names you give live only in this browser. The room's real address is always its slug.") }}
 			</p>
 		</div>
@@ -131,70 +119,52 @@
 	{# ---- chat column ------------------------------------------------------------------------ #}
 	<div class="flex min-w-0 flex-1 flex-col">
 
-		<div class="shrink-0 border-b border-outline-subtle bg-surface-card">
+		<div class="shrink-0 border-b border-outline bg-surface-alt">
 			{# No wrapping: the room name truncates instead of dropping to its own line under the
 			   controls, which reads as a broken layout on a long name. #}
 			<div class="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-2.5 sm:gap-3">
-				<button type="button" class="cb-icon-btn !h-7 !w-7 shrink-0 md:hidden" @click="show_sidebar = true">
-					{{ icon("menu", "w-4 h-4") }}
-					<span class="sr-only">{{ _("Your clipboards") }}</span>
-				</button>
+				{{ icon_button(icon("menu", "w-4 h-4"), _("Your clipboards"), classes="!size-7 md:hidden", attrs='@click="show_sidebar = true"') }}
 
 				{# m-0 is required: preflight is deliberately not imported (see
 				   tailwind/clipboard.css), so Bootstrap's own h1 margins survive and would push
 				   the name off the row. #}
 				<h1
-					class="m-0 min-w-0 flex-1 truncate text-base font-semibold tracking-tight text-ink-strong"
+					class="m-0 min-w-0 flex-1 truncate text-base font-semibold tracking-tight text-on-surface-strong"
 					:title="room_name"
 					x-text="current_label"
 				>{{ room.room_name | e }}</h1>
 
-				<p class="cb-chip shrink-0">
-					{{ icon("clock", "w-3.5 h-3.5") }}
-					<span x-text="expiry_label"></span>
-				</p>
+				{{ chip(icon("clock", "w-3.5 h-3.5") ~ '<span x-text="expiry_label"></span>', classes="shrink-0") }}
 
-				<label class="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+				<label class="flex shrink-0 items-center gap-1.5 text-xs text-on-surface/60">
 					<span class="hidden sm:inline">{{ _("Delete after") }}</span>
-					<select
-						class="cb-field !h-7 !w-auto !py-0 text-xs"
-						x-model.number="validity_hours"
-						@change="save_validity()"
-					>
-						{% for option in validity_options %}
-						<option value="{{ option.hours }}">{{ option.label }}</option>
-						{% endfor %}
-					</select>
+					{%- call select(attrs='x-model.number="validity_hours" @change="save_validity()"') -%}
+					{% for option in validity_options %}
+					<option value="{{ option.hours }}">{{ option.label }}</option>
+					{% endfor %}
+					{%- endcall -%}
 				</label>
 
 				<div class="relative shrink-0" @click.outside="show_qr = false">
-					<button
-						type="button"
-						class="cb-icon-btn !h-7 !w-7"
-						:aria-expanded="show_qr"
-						@click="show_qr = !show_qr"
-					>
-						{{ icon("qr", "w-3.5 h-3.5") }}
-						<span class="sr-only">{{ _("Show QR code") }}</span>
-					</button>
+					{{ icon_button(icon("qr", "w-3.5 h-3.5"), _("Show QR code"), classes="!size-7", attrs='@click="show_qr = !show_qr" :aria-expanded="show_qr"') }}
 					<div
-						class="cb-card absolute right-0 top-full z-40 mt-2 w-56 p-3 shadow-cb-md"
+						class="absolute right-0 top-full z-40 mt-2 w-56 rounded-radius border border-outline bg-surface p-3 shadow-lg"
 						x-show="show_qr"
 						x-cloak
 					>
-						<div class="mx-auto max-w-40 text-ink-strong">{{ qr_svg | safe }}</div>
-						<p class="mt-2 text-center text-xs text-ink-muted">{{ _("Scan to open this room on your phone") }}</p>
-						<p class="mt-2 text-center text-xs break-all text-ink-subtle">{{ room_url | e }}</p>
+						<div class="mx-auto max-w-40 text-on-surface-strong">{{ qr_svg | safe }}</div>
+						<p class="m-0 mt-2 text-center text-xs text-on-surface/60">{{ _("Scan to open this room on your phone") }}</p>
+						<p class="m-0 mt-2 text-center text-xs break-all text-on-surface/50">{{ room_url | e }}</p>
 					</div>
 				</div>
 			</div>
 
 			{% if room.is_weak_name %}
 			<div class="mx-auto w-full max-w-3xl px-4 pb-2.5">
-				<div class="cb-alert">
-					{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
-					<p>{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}</p>
-				</div>
+				{%- call alert(tone="warning") -%}
+				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
+				<p class="m-0">{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}</p>
+				{%- endcall -%}
 			</div>
 			{% endif %}
 		</div>
@@ -211,33 +181,23 @@
 				   first like a chat log. #}
 				<ul class="m-0 list-none space-y-3 pl-0" x-init="$el.remove()">
 					{% for item in room["items"] | reverse %}
-					<li class="cb-card p-3">
+					<li class="rounded-radius bg-surface-alt p-3">
 						{% if item.item_type == "Image" %}
-						<a href="{{ item.file_url | e }}" target="_blank" rel="noopener">
-							<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
-						</a>
+						<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-radius">
 						{% elif item.item_type == "File" %}
-						{% if item.file_type in video_file_types %}
-						<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" src="{{ item.file_url | e }}"></video>
-						{% else %}
-						<a class="cb-btn cb-btn-secondary" href="{{ item.file_url | e }}" download>
-							{{ icon("download") }}
-							{{ item.file_name | e }}
-						</a>
-						{% endif %}
+						<a class="text-sm" href="{{ item.file_url | e }}" download>{{ item.file_name | e }}</a>
 						{% endif %}
 						{% if item.content %}
-						<pre class="m-0 max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong {{ 'mt-2' if item.item_type != 'Text' }}">{{ item.content | e }}</pre>
+						<pre class="m-0 max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-on-surface-strong">{{ item.content | e }}</pre>
 						{% endif %}
-						<p class="m-0 mt-2 text-xs text-ink-muted">{{ _("Text") if item.item_type == "Text" else item.file_name | e }}</p>
 					</li>
 					{% endfor %}
 				</ul>
 
 				<div class="space-y-4" x-show="!items.length" x-cloak>
-					<div class="cb-card border-dashed p-6 text-center">
-						<p class="m-0 text-sm font-medium text-ink-strong">{{ _("Nothing here yet.") }}</p>
-						<p class="m-0 mt-1 text-sm text-ink-muted">
+					<div class="rounded-radius border border-dashed border-outline-strong p-6 text-center">
+						<p class="m-0 text-sm font-medium text-on-surface-strong">{{ _("Nothing here yet.") }}</p>
+						<p class="m-0 mt-1 text-sm text-on-surface/60">
 							{{ _("Paste with Ctrl+V, drop a file anywhere, or type below. Ctrl+C copies the newest item back out. Everything in this room is deleted") }}
 							<span x-text="expiry_label"></span>.
 						</p>
@@ -248,38 +208,38 @@
 				{# Pinned items lift out of the log into their own group so they stay reachable
 				   however far the conversation has scrolled. #}
 				<div class="mb-4" x-show="pinned_items.length" x-cloak>
-					<p class="m-0 mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+					<p class="m-0 mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-on-surface/60 uppercase">
 						{{ icon("pin", "w-3.5 h-3.5") }}
 						{{ _("Pinned") }}
 					</p>
-					<ul class="m-0 list-none space-y-2 pl-0">
+					<ul class="m-0 list-none space-y-3 pl-0">
 						<template x-for="item in pinned_items" :key="`pinned-${item.name}`">
-							<li>{{ item_bubble() }}</li>
+							<li>{{ chat_bubble(icon) }}</li>
 						</template>
 					</ul>
 				</div>
 
-				<ul class="m-0 list-none space-y-2 pl-0">
+				<ul class="m-0 list-none space-y-3 pl-0">
 					<template x-for="item in ordered_items" :key="item.name">
-						<li>{{ item_bubble() }}</li>
+						<li>{{ chat_bubble(icon) }}</li>
 					</template>
 				</ul>
 			</div>
 		</div>
 
 		{# ---- composer ------------------------------------------------------------------------ #}
-		<div class="relative shrink-0 border-t border-outline-subtle bg-surface-card">
+		<div class="relative shrink-0 border-t border-outline bg-surface-alt">
 			{# Anchored above the composer rather than inside it, so a long message never pushes
 			   the input off a phone screen. #}
 			<div class="absolute bottom-full left-0 w-full px-4 pb-2" x-show="error_message" x-cloak>
-				<div class="cb-alert cb-alert-danger mx-auto max-w-3xl shadow-cb-md">
-					{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
-					<p class="m-0 flex-1" x-text="error_message"></p>
-					<button type="button" class="shrink-0 text-ink-muted" @click="error_message = ''">
-						{{ icon("close", "w-3.5 h-3.5") }}
-						<span class="sr-only">{{ _("Dismiss") }}</span>
-					</button>
-				</div>
+				{%- call alert(tone="danger", classes="mx-auto max-w-3xl bg-surface shadow-lg") -%}
+				{{ icon("warning", "w-4 h-4 shrink-0 mt-0.5") }}
+				<p class="m-0 flex-1" x-text="error_message"></p>
+				<button type="button" class="shrink-0" @click="error_message = ''">
+					{{ icon("close", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Dismiss") }}</span>
+				</button>
+				{%- endcall -%}
 			</div>
 
 			{# Staged attachments. Files wait here rather than uploading on drop, so whatever is
@@ -287,18 +247,15 @@
 			<div class="mx-auto w-full max-w-3xl px-4 pt-3" x-show="pending_files.length" x-cloak>
 				<ul class="m-0 flex list-none flex-wrap gap-2 pl-0">
 					<template x-for="(file, index) in pending_files" :key="`${file.name}-${index}`">
-						<li class="cb-card flex items-center gap-2 py-1.5 pr-1.5 pl-2">
+						<li class="flex items-center gap-2 rounded-radius border border-outline bg-surface py-1.5 pr-1.5 pl-2">
 							<template x-if="pending_preview(file)">
-								<img :src="pending_preview(file)" alt="" class="h-8 w-8 rounded object-cover">
+								<img :src="pending_preview(file)" alt="" class="size-8 rounded object-cover">
 							</template>
 							<template x-if="!pending_preview(file)">
-								<span class="text-ink-muted">{{ icon("paperclip", "w-4 h-4") }}</span>
+								<span class="text-on-surface/60">{{ icon("paperclip", "w-4 h-4") }}</span>
 							</template>
-							<span class="max-w-40 truncate text-xs text-ink-secondary" x-text="file.name"></span>
-							<button type="button" class="cb-icon-btn !h-6 !w-6 shrink-0" @click="remove_pending(index)">
-								{{ icon("close", "w-3 h-3") }}
-								<span class="sr-only">{{ _("Remove attachment") }}</span>
-							</button>
+							<span class="max-w-40 truncate text-xs text-on-surface" x-text="file.name"></span>
+							{{ icon_button(icon("close", "w-3 h-3"), _("Remove attachment"), classes="!size-6", attrs='@click="remove_pending(index)"') }}
 						</li>
 					</template>
 				</ul>
@@ -306,30 +263,26 @@
 
 			<form class="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-3" @submit.prevent="send_draft()">
 				<label class="sr-only" for="draft_input">{{ _("Text to share") }}</label>
-				<textarea
-					id="draft_input"
-					x-model="draft_text"
-					rows="1"
-					:placeholder="pending_files.length ? '{{ _('Add a caption, or just send') }}' : '{{ _('Type, paste, or drop a file') }}'"
-					class="cb-field max-h-40 flex-1 resize-none"
-					@input="resize_draft($event.target)"
-					@keydown.enter="if ($event.ctrlKey || $event.metaKey) { $event.preventDefault(); send_draft(); }"
-				></textarea>
+				{{ textarea(
+					"draft_input",
+					"pending_files.length ? labels.caption_placeholder : labels.draft_placeholder",
+					classes="max-h-40 flex-1",
+					attrs='x-model="draft_text" @input="resize_draft($event.target)" @keydown.enter="if ($event.ctrlKey || $event.metaKey) { $event.preventDefault(); send_draft(); }"'
+				) }}
 
-				<label class="cb-icon-btn shrink-0 cursor-pointer">
+				<label class="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-radius border border-outline bg-surface text-on-surface transition hover:opacity-75">
 					{{ icon("paperclip", "w-4 h-4") }}
 					<span class="sr-only">{{ _("Add files") }}</span>
 					<input type="file" accept="{{ accept_attribute | e }}" multiple class="hidden" @change="add_picked_files($event)">
 				</label>
 
-				<button
-					type="submit"
-					:disabled="is_busy || (!draft_text.trim() && !pending_files.length)"
-					class="cb-btn cb-btn-primary !h-9 !w-9 shrink-0 !px-0 disabled:opacity-50"
-				>
-					{{ icon("send", "w-4 h-4") }}
-					<span class="sr-only">{{ _("Send") }}</span>
-				</button>
+				{{ button(
+					variant="primary",
+					type="submit",
+					classes="!size-9 !px-0",
+					attrs=':disabled="is_busy || (!draft_text.trim() && !pending_files.length)"',
+					icon_html=icon("send", "w-4 h-4") ~ '<span class="sr-only">' ~ _("Send") ~ '</span>'
+				) }}
 			</form>
 		</div>
 	</div>

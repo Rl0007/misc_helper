@@ -13,39 +13,79 @@
  * free. `@theme inline` is required for that: it substitutes the var() reference into
  * the utility instead of freezing a resolved value at :root. */
 
-
-
+/* ---------------------------------------------------------------------------------------------
+ * PenguinUI token bridge.
+ *
+ * PenguinUI components (MIT, Salar Houshvand -- see NOTICE) are written against a fixed set of
+ * semantic colour names. Defining those names here, backed by frappe-ui/espresso variables, lets
+ * their markup be pasted essentially verbatim while every colour still comes from Frappe.
+ *
+ * THE `dark:` CLASSES MUST BE STRIPPED FROM PASTED MARKUP. PenguinUI writes every colour twice
+ * (`bg-surface-alt dark:bg-surface-dark-alt`) because Tailwind's `dark:` variant follows
+ * prefers-color-scheme. Frappe does not: it stamps [data-theme="dark"] on the root, and espresso
+ * already swaps these variables underneath us. Keeping `dark:` would make the page follow the OS
+ * and ignore the user's chosen Frappe theme.
+ *
+ * Each `-dark` name is therefore aliased to the SAME espresso variable as its light twin, so a
+ * `dark:` class that survives a paste is a harmless no-op rather than a wrong colour.
+ *
+ * One deliberate divergence: PenguinUI treats danger/success/warning/info as SOLID fills with
+ * on-* text over them. Espresso ships tinted alert surfaces with a strong ink instead, and those
+ * tints are what make dark mode free here, so the mapping keeps espresso's convention.
+ * ------------------------------------------------------------------------------------------- */
 @theme inline {
-	--color-surface-base: var(--surface-base);
-	--color-surface-card: var(--surface-gray-1);
-	--color-surface-subtle: var(--surface-gray-2);
-	--color-surface-hover: var(--surface-gray-3);
-	--color-surface-elevated: var(--surface-elevation-1);
-	--color-surface-solid: var(--surface-gray-7);
-	--color-surface-solid-hover: var(--surface-gray-8);
-	--color-surface-danger: var(--surface-red-1);
-	--color-surface-danger-hover: var(--surface-red-2);
-	--color-surface-success: var(--surface-green-1);
-	--color-surface-warning: var(--surface-amber-1);
+	--color-surface: var(--surface-base);
+	--color-surface-alt: var(--surface-gray-2);
+	--color-surface-dark: var(--surface-base);
+	--color-surface-dark-alt: var(--surface-gray-2);
 
-	--color-ink-base: var(--ink-gray-8);
-	--color-ink-strong: var(--ink-gray-9);
-	--color-ink-secondary: var(--ink-gray-6);
-	--color-ink-muted: var(--ink-gray-5);
-	--color-ink-subtle: var(--ink-gray-4);
-	--color-ink-inverse: var(--ink-base);
-	--color-ink-link: var(--ink-blue-link);
-	--color-ink-danger: var(--ink-red-8);
-	--color-ink-success: var(--ink-green-8);
-	--color-ink-warning: var(--ink-amber-8);
+	--color-on-surface: var(--ink-gray-8);
+	--color-on-surface-strong: var(--ink-gray-9);
+	--color-on-surface-dark: var(--ink-gray-8);
+	--color-on-surface-dark-strong: var(--ink-gray-9);
 
-	--color-outline-base: var(--outline-base);
-	--color-outline-subtle: var(--outline-gray-1);
+	--color-outline: var(--outline-gray-2);
 	--color-outline-strong: var(--outline-gray-3);
-	--color-outline-focus: var(--outline-gray-4);
-	--color-outline-danger: var(--outline-red-2);
-	--color-outline-success: var(--outline-green-2);
-	--color-outline-warning: var(--outline-amber-2);
+	--color-outline-dark: var(--outline-gray-2);
+	--color-outline-dark-strong: var(--outline-gray-3);
+
+	/* gray-8, not gray-7: gray-7 is #7c7c7c in light, and white on it is ~3.5:1 -- under WCAG AA
+	   for body text. gray-8 (#525252 light / #afafaf dark) clears 7:1 against --ink-base in both
+	   themes, which matters because whole pasted messages are read inside a primary bubble. */
+	--color-primary: var(--surface-gray-8);
+	--color-on-primary: var(--ink-base);
+	--color-primary-dark: var(--surface-gray-8);
+	--color-on-primary-dark: var(--ink-base);
+
+	--color-secondary: var(--surface-gray-2);
+	--color-on-secondary: var(--ink-gray-8);
+	--color-secondary-dark: var(--surface-gray-2);
+	--color-on-secondary-dark: var(--ink-gray-8);
+
+	--color-danger: var(--surface-red-2);
+	--color-on-danger: var(--ink-red-8);
+	--color-danger-dark: var(--surface-red-2);
+	--color-on-danger-dark: var(--ink-red-8);
+
+	--color-success: var(--surface-green-2);
+	--color-on-success: var(--ink-green-8);
+	--color-success-dark: var(--surface-green-2);
+	--color-on-success-dark: var(--ink-green-8);
+
+	--color-warning: var(--surface-amber-2);
+	--color-on-warning: var(--ink-amber-8);
+	--color-warning-dark: var(--surface-amber-2);
+	--color-on-warning-dark: var(--ink-amber-8);
+
+	--color-info: var(--surface-blue-2);
+	--color-on-info: var(--ink-blue-8);
+	--color-info-dark: var(--surface-blue-2);
+	--color-on-info-dark: var(--ink-blue-8);
+}
+
+/* PenguinUI's single radius token, matched to the card radius this app already uses. */
+@theme {
+	--radius-radius: 0.75rem;
 }
 
 /* Static tokens (not var() indirections onto espresso vars, so plain @theme, not

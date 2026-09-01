@@ -19,10 +19,10 @@
 {# shell_class/main_class let a page opt into a fixed-height shell whose inner pane scrolls
    instead of the document. Defaults keep every other page on ordinary document scrolling --
    h-dvh here unconditionally would clip anything taller than the viewport. #}
-<div class="cb-page flex flex-col bg-surface-base {% block shell_class %}min-h-screen{% endblock %}">
-	<header class="shrink-0 border-b border-outline-subtle bg-surface-card">
+<div class="cb-page flex flex-col bg-surface {% block shell_class %}min-h-screen{% endblock %}">
+	<header class="shrink-0 border-b border-outline bg-surface-alt">
 		<div class="mx-auto flex w-full max-w-5xl items-center px-4 py-3">
-			<a href="/clipboard" class="text-sm font-semibold text-ink-strong">{{ _("Misc Helper") }}</a>
+			<a href="/clipboard" class="text-sm font-semibold text-on-surface-strong no-underline">{{ _("Misc Helper") }}</a>
 		</div>
 	</header>
 	<main class="flex-1 {% block main_class %}{% endblock %}">

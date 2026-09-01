@@ -1,5 +1,6 @@
 {% extends "templates/clipboard_layout.html" %}
 {% from "templates/macros/clipboard.html" import icon, naming_advice %}
+{% from "templates/macros/clipboard/ui.html" import button %}
 
 {% block title %}{{ _("Clipboard Rooms") }}{% endblock %}
 
@@ -9,15 +10,15 @@
 {% endblock %}
 
 {% block page_content %}
-<div class="cb-page bg-surface-base text-ink-base py-8">
+<div class="cb-page bg-surface py-8 text-on-surface">
 	<div class="mx-auto w-full max-w-xl px-4">
-		<h1 class="text-2xl font-semibold tracking-tight text-ink-strong">{{ _("Clipboard rooms") }}</h1>
-		<p class="mt-2 text-sm text-ink-muted">
+		<h1 class="m-0 text-2xl font-semibold tracking-tight text-on-surface-strong">{{ _("Clipboard rooms") }}</h1>
+		<p class="m-0 mt-2 text-sm text-on-surface/60">
 			{{ _("Say a room name out loud, type it on every device, and share text and images between them. Nothing to install.") }}
 		</p>
 
-		<form class="cb-card mt-6 p-3" x-data="clipboard_landing" @submit.prevent="open_room()">
-			<label class="block text-sm font-medium text-ink-strong" for="room_name_input">
+		<form class="mt-6 rounded-radius border border-outline bg-surface-alt p-3" x-data="clipboard_landing" @submit.prevent="open_room()">
+			<label class="block text-sm font-medium text-on-surface-strong" for="room_name_input">
 				{{ _("Enter a room name") }}
 			</label>
 			<div class="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -29,21 +30,20 @@
 					autocapitalize="off"
 					spellcheck="false"
 					placeholder="rahul-standup"
-					class="cb-field"
+					class="w-full rounded-radius border border-outline bg-surface px-3 py-2 text-sm text-on-surface placeholder:text-on-surface/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong"
 				>
-				<button
-					type="submit"
-					:disabled="!is_valid"
-					class="cb-btn cb-btn-primary shrink-0 text-base disabled:opacity-50"
-				>
-					{{ _("Open room") }}
-					{{ icon("arrow-right") }}
-				</button>
+				{{ button(
+					label=_("Open room"),
+					type="submit",
+					classes="shrink-0",
+					attrs=':disabled="!is_valid"',
+					icon_html=icon("arrow-right")
+				) }}
 			</div>
-			<p class="mt-1.5 h-4 text-sm text-ink-muted" x-cloak>
+			<p class="m-0 mt-1.5 h-4 text-sm text-on-surface/60" x-cloak>
 				<span x-show="room_name && !is_valid">{{ _("Use 3-41 characters: letters, numbers and dashes.") }}</span>
 				<span x-show="room_name && is_valid && slug !== room_name">
-					{{ _("Opens") }} <span class="font-medium text-ink-strong">/clipboard/<span x-text="slug"></span></span>
+					{{ _("Opens") }} <span class="font-medium text-on-surface-strong">/clipboard/<span x-text="slug"></span></span>
 				</span>
 			</p>
 		</form>
@@ -52,9 +52,9 @@
 			{{ naming_advice() }}
 		</div>
 
-		<div class="cb-card mt-6 p-4 text-sm text-ink-secondary">
-			<p class="font-medium text-ink-strong">{{ _("How it works") }}</p>
-			<ul class="mt-2 space-y-1 list-disc pl-5">
+		<div class="mt-6 rounded-radius border border-outline bg-surface-alt p-4 text-sm text-on-surface">
+			<p class="m-0 font-medium text-on-surface-strong">{{ _("How it works") }}</p>
+			<ul class="m-0 mt-2 list-disc space-y-1 pl-5">
 				<li>{{ _("There is no create step — the room exists the first time someone opens it.") }}</li>
 				<li>{{ _("Paste anywhere on the room page with Ctrl+V, or type and send.") }}</li>
 				<li>{{ _("Scan the room's QR code to carry on from your phone.") }}</li>

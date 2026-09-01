@@ -1,0 +1,170 @@
+{# Clipboard UI components.
+   =========================================================================================
+   Markup adapted from Penguin UI (MIT, Copyright (c) Salar Houshvand) --
+   https://github.com/SalarHoushvand/penguinui-components. See NOTICE at the repo root.
+
+   Two systematic changes were made to every component taken from there, and both matter:
+
+   1. EVERY `dark:` VARIANT IS STRIPPED. Penguin UI writes each colour twice because Tailwind's
+      `dark:` follows prefers-color-scheme. Frappe stamps [data-theme="dark"] on the root instead,
+      and the espresso variables behind these token names already swap underneath us. Keeping
+      `dark:` would make the page follow the OS and ignore the user's chosen Frappe theme.
+
+   2. HARDCODED PALETTE CLASSES ARE REPLACED BY SEMANTIC ONES. Penguin UI's alert, for instance,
+      ships `border-sky-500 text-sky-500`; that is a literal colour with no dark-mode counterpart
+      here, so it becomes `border-info text-on-info`.
+
+   Preflight is deliberately not imported (it would strip Frappe's chrome), so Bootstrap's own
+   element styles survive and every macro below carries its own resets -- `m-0` on headings, `p`
+   and `pre`, `list-none pl-0` on lists. Dropping one does not look broken locally; it looks
+   broken only on a page that also loads Frappe's bundle, which is every page in production.
+   ========================================================================================= #}
+
+{%- macro button(label="", variant="primary", type="button", classes="", attrs="", icon_html="") -%}
+{%- set palette = {
+	"primary": "bg-primary! border-primary! text-on-primary focus-visible:outline-primary",
+	"secondary": "bg-surface-alt border-outline text-on-surface-strong focus-visible:outline-outline-strong",
+	"ghost": "bg-transparent border-transparent text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
+	"danger": "bg-danger! border-danger! text-on-danger focus-visible:outline-danger"
+} -%}
+<button
+	type="{{ type }}"
+	class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-radius border px-4 py-2 text-sm font-medium tracking-wide transition hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 active:opacity-100 active:outline-offset-0 disabled:cursor-not-allowed disabled:opacity-50 {{ palette[variant] }} {{ classes }}"
+	{{ attrs | safe }}
+>{{ icon_html | safe }}{{ label }}{{ caller() if caller is defined and caller else "" }}</button>
+{%- endmacro -%}
+
+{%- macro icon_button(icon_html, label, classes="", attrs="", variant="ghost") -%}
+{%- set palette = {
+	"ghost": "border-transparent text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
+	"secondary": "border-outline bg-surface text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
+	"danger": "border-transparent text-on-danger hover:bg-danger focus-visible:outline-danger"
+} -%}
+<button
+	type="button"
+	class="inline-flex size-8 shrink-0 items-center justify-center rounded-radius border transition hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 {{ palette[variant] }} {{ classes }}"
+	{{ attrs | safe }}
+>{{ icon_html | safe }}<span class="sr-only">{{ label }}</span></button>
+{%- endmacro -%}
+
+{# Avatar. The seed is the opaque sender id, so the same browser always draws the same face
+   without anything about it being stored or displayed. Agents get a visibly different style
+   (robots) so a message from a model is never mistaken for a person's. #}
+{%- macro avatar(seed_expr, kind_expr="'human'", classes="size-8") -%}
+<img
+	class="shrink-0 rounded-full border border-outline bg-surface-alt object-cover cb-avatar {{ classes }}"
+	alt=""
+	loading="lazy"
+	:src="avatar_url({{ seed_expr }}, {{ kind_expr }})"
+>
+{%- endmacro -%}
+
+{%- macro chip(body, classes="") -%}
+<span class="inline-flex items-center gap-1.5 rounded-radius border border-outline bg-surface-alt px-2 py-0.5 text-xs font-medium text-on-surface {{ classes }}">{{ body | safe }}</span>
+{%- endmacro -%}
+
+{%- macro alert(tone="danger", classes="", attrs="") -%}
+{%- set palette = {
+	"danger": "border-danger! bg-danger/40 text-on-danger",
+	"warning": "border-warning! bg-warning/40 text-on-warning",
+	"info": "border-info! bg-info/40 text-on-info"
+} -%}
+<div role="alert" class="flex w-full items-start gap-2 overflow-hidden rounded-radius border p-3 text-sm {{ palette[tone] }} {{ classes }}" {{ attrs | safe }}>
+	{{ caller() }}
+</div>
+{%- endmacro -%}
+
+{%- macro select(classes="", attrs="") -%}
+<select
+	class="appearance-none rounded-radius border border-outline bg-surface-alt px-2 py-1 text-xs text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong disabled:cursor-not-allowed disabled:opacity-75 {{ classes }}"
+	{{ attrs | safe }}
+>{{ caller() }}</select>
+{%- endmacro -%}
+
+{%- macro textarea(id, placeholder_expr, classes="", attrs="") -%}
+<textarea
+	id="{{ id }}"
+	rows="1"
+	:placeholder="{{ placeholder_expr }}"
+	class="w-full resize-none rounded-radius border border-outline bg-surface-alt px-3 py-2 text-sm text-on-surface placeholder:text-on-surface/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong {{ classes }}"
+	{{ attrs | safe }}
+></textarea>
+{%- endmacro -%}
+
+{# Chat bubble, from Penguin UI's chat-bubble-with-avatar. Mine sits right on `primary`,
+   everyone else's sits left on `surface-alt`, and the asymmetric corner radii are what make it
+   read as a conversation rather than a list of cards.
+
+   The action row inherits the bubble's own ink rather than the page's, because on a `primary`
+   bubble the page ink would be invisible. #}
+{%- macro chat_bubble(icon) -%}
+<div class="flex items-end gap-2" :class="is_mine(item) ? 'flex-row-reverse' : 'flex-row'">
+	{{ avatar("item.sender", "item.sender_kind") }}
+	<div
+		class="flex min-w-0 max-w-[85%] flex-col gap-2 p-3 md:max-w-[70%]"
+		:class="is_mine(item)
+			? 'ml-auto rounded-l-radius rounded-tr-radius bg-primary! text-on-primary'
+			: 'mr-auto rounded-r-radius rounded-tl-radius bg-surface-alt text-on-surface'"
+	>
+		<template x-if="item.item_type === 'Image'">
+			<a :href="item.file_url" target="_blank" rel="noopener">
+				<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-radius" @load="on_media_load()">
+			</a>
+		</template>
+		<template x-if="item.item_type === 'File' && is_video(item)">
+			<video controls preload="metadata" class="max-h-64 w-full rounded-radius" :src="item.file_url" @loadedmetadata="on_media_load()"></video>
+		</template>
+		<template x-if="item.item_type === 'File' && !is_video(item)">
+			<a
+				class="inline-flex max-w-full items-center gap-2 rounded-radius border border-current/25 px-3 py-2 text-sm text-inherit no-underline hover:text-inherit"
+				:href="item.file_url"
+				download
+			>
+				{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
+				<span class="truncate" x-text="item.file_name"></span>
+			</a>
+		</template>
+
+		{# x-text, never x-html: add_text and add_file are xss_safe, so nothing bleaches this on
+		   the way in and escaping here is the only remaining XSS defence. #}
+		<template x-if="item.content">
+			<pre class="m-0 max-h-64 overflow-auto bg-transparent font-mono text-sm break-words whitespace-pre-wrap text-inherit" x-text="item.content"></pre>
+		</template>
+
+		<div class="flex items-center justify-between gap-2 text-xs opacity-75">
+			<span class="flex min-w-0 items-center gap-1 truncate">
+				<span x-show="Number(item.is_pinned)" x-cloak>{{ icon("pin", "w-3 h-3 shrink-0") }}</span>
+				<span class="truncate" x-text="format_item_meta(item)"></span>
+			</span>
+			<div class="flex shrink-0 items-center gap-0.5">
+				<button
+					type="button"
+					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
+					:class="Number(item.is_pinned) ? 'bg-current/15' : ''"
+					@click="toggle_pin(item)"
+				>
+					{{ icon("pin", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Pin") }}</span>
+				</button>
+				<button
+					type="button"
+					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
+					@click="copy_item(item)"
+				>
+					<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
+					<span x-show="copied_item_name === item.name" x-cloak>{{ icon("check", "w-3.5 h-3.5") }}</span>
+					<span class="sr-only">{{ _("Copy") }}</span>
+				</button>
+				<button
+					type="button"
+					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
+					@click="delete_item(item)"
+				>
+					{{ icon("trash", "w-3.5 h-3.5") }}
+					<span class="sr-only">{{ _("Delete") }}</span>
+				</button>
+			</div>
+		</div>
+	</div>
+</div>
+{%- endmacro -%}

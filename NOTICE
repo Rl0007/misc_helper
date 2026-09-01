@@ -1,0 +1,9 @@
+misc_helper bundles UI component markup adapted from Penguin UI
+(https://www.penguinui.com, https://github.com/SalarHoushvand/penguinui-components).
+
+Penguin UI is licensed under the MIT License, Copyright (c) Salar Houshvand.
+
+The adapted markup lives in misc_helper/templates/macros/clipboard/. It is modified from the
+originals: the `dark:` colour variants are removed and the semantic colour names are re-pointed
+at Frappe's frappe-ui/espresso CSS variables, so theming follows Frappe's [data-theme] switch
+rather than the operating system's prefers-color-scheme.
