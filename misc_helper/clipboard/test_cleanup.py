@@ -6,7 +6,7 @@ import os
 import frappe
 from frappe.utils.data import add_to_date, now_datetime
 
-from misc_helper.clipboard.api import add_image, add_text
+from misc_helper.clipboard.api import add_file, add_text
 from misc_helper.clipboard.cleanup import delete_expired_rooms
 from misc_helper.clipboard.test_base import ClipboardTestBase
 
@@ -24,7 +24,7 @@ class TestDeleteExpiredRooms(ClipboardTestBase):
 	def test_expired_room_its_items_and_its_files_are_deleted(self):
 		expired_room = self.create_room(prefix="expired")
 		text_item = add_text(expired_room, "goes away")["name"]
-		image = add_image(expired_room, "shot.png", self.encode(self.make_image_bytes()))
+		image = add_file(expired_room, "shot.png", self.encode(self.make_image_bytes()))
 		image_item = image["name"]
 		stored_file = frappe.db.get_value(
 			"File", {"attached_to_doctype": "Clipboard Item", "attached_to_name": image_item}, "name"

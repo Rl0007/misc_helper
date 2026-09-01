@@ -4,11 +4,18 @@ document.addEventListener('alpine:init', () => {
 		items: context.room.items,
 		seconds_left: context.expires_in_seconds,
 		expires_on: context.room.expires_on,
+		validity_hours: context.room.validity_hours,
+		allowed_file_types: context.room.allowed_file_types,
+		video_file_types: context.video_file_types,
+		max_file_bytes: context.room.max_file_bytes,
 		draft_text: '',
 		error_message: '',
 		copied_item_name: '',
 		is_busy: false,
 		show_qr: false,
+		// dragenter/dragleave also fire as the pointer crosses each child element, so a boolean
+		// flickers the overlay off mid-drag. Counting enters against leaves does not.
+		drag_depth: 0,
 		poll_timer: null,
 		labels: context.labels,
 
@@ -16,6 +23,10 @@ document.addEventListener('alpine:init', () => {
 			this.show_qr = window.matchMedia('(min-width: 768px)').matches;
 			setInterval(() => this.count_down(), 1000);
 			this.add_realtime_listener();
+		},
+
+		get is_dragging() {
+			return this.drag_depth > 0;
 		},
 
 		get expiry_label() {
@@ -86,6 +97,7 @@ document.addEventListener('alpine:init', () => {
 			});
 			const room = response.message;
 			this.items = room.items;
+			this.validity_hours = room.validity_hours;
 			this.set_expiry(room.expires_on);
 		},
 
@@ -98,15 +110,28 @@ document.addEventListener('alpine:init', () => {
 			this.draft_text = '';
 		},
 
-		async add_from_paste(event) {
-			const image_file = [...(event.clipboardData?.items || [])]
-				.filter((clipboard_item) => clipboard_item.type.startsWith('image/'))
-				.map((clipboard_item) => clipboard_item.getAsFile())
-				.find(Boolean);
+		async save_validity() {
+			this.error_message = '';
+			try {
+				const room = await call_api('misc_helper.clipboard.api.set_validity', {
+					room_name: this.room_name,
+					validity_hours: this.validity_hours,
+				});
+				this.set_expiry(room.expires_on);
+			} catch (error) {
+				this.error_message = error.message || this.labels.request_failed;
+			}
+		},
 
-			if (image_file) {
+		async add_from_paste(event) {
+			const pasted_files = [...(event.clipboardData?.items || [])]
+				.filter((clipboard_item) => clipboard_item.kind === 'file')
+				.map((clipboard_item) => clipboard_item.getAsFile())
+				.filter(Boolean);
+
+			if (pasted_files.length) {
 				event.preventDefault();
-				await this.save_image(image_file);
+				await this.upload_files(pasted_files);
 				return;
 			}
 
@@ -122,12 +147,69 @@ document.addEventListener('alpine:init', () => {
 			}
 		},
 
-		async add_picked_image(event) {
-			const image_file = event.target.files?.[0];
-			event.target.value = '';
-			if (image_file) {
-				await this.save_image(image_file);
+		// Ctrl+C with nothing selected copies the newest item, so a phone-to-laptop handoff is
+		// paste, switch machine, copy. A real selection or a focused field keeps normal copy —
+		// silently hijacking Ctrl+C over selected text would lose what the user meant to take.
+		async copy_latest(event) {
+			const is_editable = ['INPUT', 'TEXTAREA'].includes(event.target?.tagName);
+			if (
+				is_editable ||
+				window.getSelection().toString() ||
+				!this.items.length
+			) {
+				return;
 			}
+			event.preventDefault();
+			await this.copy_item(this.items[0]);
+		},
+
+		async add_dropped_files(event) {
+			this.drag_depth = 0;
+			await this.upload_files([...(event.dataTransfer?.files || [])]);
+		},
+
+		async add_picked_files(event) {
+			const picked_files = [...(event.target.files || [])];
+			event.target.value = '';
+			await this.upload_files(picked_files);
+		},
+
+		// Sequential, not Promise.all: each upload slides the room expiry and publishes a realtime
+		// ping, and every one of them counts against the per-room write rate limit.
+		async upload_files(files) {
+			for (const file of files) {
+				if (!this.is_allowed(file)) {
+					return;
+				}
+				await this.save_file(file);
+				if (this.error_message) {
+					return;
+				}
+			}
+		},
+
+		// Checked here as well as on the server: an over-long body is rejected by Werkzeug before
+		// our endpoint is entered, so without this the user gets a bare 413 and no explanation.
+		is_allowed(file) {
+			if (!(file.name || '').includes('.')) {
+				this.error_message = this.labels.no_extension;
+				return false;
+			}
+			const file_type = file.name.split('.').pop().toUpperCase();
+			if (!this.allowed_file_types.includes(file_type)) {
+				this.error_message = this.labels.type_not_allowed.replace(
+					'{0}',
+					file_type,
+				);
+				return false;
+			}
+			if (file.size > this.max_file_bytes) {
+				this.error_message = this.labels.file_too_large
+					.replace('{0}', format_bytes(file.size))
+					.replace('{1}', format_bytes(this.max_file_bytes));
+				return false;
+			}
+			return true;
 		},
 
 		async save_text(content) {
@@ -137,11 +219,11 @@ document.addEventListener('alpine:init', () => {
 			});
 		},
 
-		async save_image(image_file) {
-			const data_base64 = await get_base64(image_file);
-			await this.save_item('misc_helper.clipboard.api.add_image', {
+		async save_file(file) {
+			const data_base64 = await get_base64(file);
+			await this.save_item('misc_helper.clipboard.api.add_file', {
 				room_name: this.room_name,
-				file_name: image_file.name || 'pasted-image.png',
+				file_name: file.name || 'pasted-image.png',
 				data_base64,
 			});
 		},
@@ -174,14 +256,20 @@ document.addEventListener('alpine:init', () => {
 
 		async copy_item(item) {
 			try {
-				if (item.item_type === 'Image') {
+				if (item.item_type === 'Text') {
+					await navigator.clipboard.writeText(item.content);
+				} else if (item.item_type === 'Image') {
 					const image_response = await fetch(item.file_url);
 					const image_blob = await image_response.blob();
 					await navigator.clipboard.write([
 						new ClipboardItem({ [image_blob.type]: image_blob }),
 					]);
 				} else {
-					await navigator.clipboard.writeText(item.content);
+					// A video or archive is not a clipboard flavour any OS would paste, so the
+					// useful thing to hand over is the link to it.
+					await navigator.clipboard.writeText(
+						new URL(item.file_url, window.location.origin).href,
+					);
 				}
 				this.set_copied(item.name);
 			} catch {
@@ -198,8 +286,12 @@ document.addEventListener('alpine:init', () => {
 			}, 1500);
 		},
 
+		is_video(item) {
+			return this.video_file_types.includes(item.file_type);
+		},
+
 		format_item_meta(item) {
-			if (item.item_type !== 'Image') {
+			if (item.item_type === 'Text') {
 				return this.labels.text;
 			}
 			return `${item.file_name} · ${format_bytes(item.file_size)}`;
@@ -234,7 +326,9 @@ async function call_api(method, args) {
 function get_server_message(body) {
 	try {
 		const server_messages = JSON.parse(body?._server_messages || '[]');
-		return server_messages.length ? JSON.parse(server_messages.at(-1)).message : null;
+		return server_messages.length
+			? JSON.parse(server_messages.at(-1)).message
+			: null;
 	} catch {
 		return null;
 	}
@@ -259,5 +353,8 @@ function format_bytes(size) {
 	if (size < 1024 * 1024) {
 		return `${Math.round(size / 1024)} KB`;
 	}
-	return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+	if (size < 1024 * 1024 * 1024) {
+		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+	}
+	return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }

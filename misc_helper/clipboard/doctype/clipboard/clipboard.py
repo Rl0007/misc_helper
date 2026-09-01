@@ -18,6 +18,7 @@ class Clipboard(Document):
 		expires_on: DF.Datetime | None
 		last_activity: DF.Datetime | None
 		room_name: DF.Data
+		validity_hours: DF.Int
 	# end: auto-generated types
 
 	_DOCTYPE_NAME = "Clipboard"

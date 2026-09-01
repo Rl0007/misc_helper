@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "room_name",
+  "validity_hours",
   "expires_on",
   "last_activity"
  ],
@@ -30,6 +31,13 @@
    "fieldtype": "Datetime",
    "label": "Last Activity",
    "read_only": 1
+  },
+  {
+   "description": "How long this room survives after its last write. Seeded from Clipboard Settings.",
+   "fieldname": "validity_hours",
+   "fieldtype": "Int",
+   "label": "Validity Hours",
+   "non_negative": 1
   }
  ],
  "grid_page_length": 50,

@@ -8,10 +8,11 @@
  "engine": "InnoDB",
  "field_order": [
   "validity_hours",
+  "max_validity_hours",
   "max_items_per_room",
-  "max_image_size_mb",
   "max_text_size_kb",
-  "writes_per_minute_per_ip"
+  "writes_per_minute_per_ip",
+  "allowed_file_types"
  ],
  "fields": [
   {
@@ -29,13 +30,6 @@
    "non_negative": 1
   },
   {
-   "default": "5",
-   "fieldname": "max_image_size_mb",
-   "fieldtype": "Float",
-   "label": "Max Image Size (MB)",
-   "non_negative": 1
-  },
-  {
    "default": "100",
    "fieldname": "max_text_size_kb",
    "fieldtype": "Int",
@@ -48,6 +42,21 @@
    "fieldtype": "Int",
    "label": "Writes Per Minute Per IP",
    "non_negative": 1
+  },
+  {
+   "default": "168",
+   "description": "Upper bound a room may set for itself from the public page.",
+   "fieldname": "max_validity_hours",
+   "fieldtype": "Int",
+   "label": "Max Validity Hours",
+   "non_negative": 1
+  },
+  {
+   "default": "PNG\nJPG\nJPEG\nGIF\nWEBP\nBMP\nAVIF\nMP4\nWEBM\nMOV\nMKV\nAVI\nM4V\nOGV",
+   "description": "One extension per line. SVG is deliberately absent: these files are served public from this site's own origin, so an SVG carrying a script would be stored XSS against every visitor.",
+   "fieldname": "allowed_file_types",
+   "fieldtype": "Small Text",
+   "label": "Allowed File Types"
   }
  ],
  "grid_page_length": 50,

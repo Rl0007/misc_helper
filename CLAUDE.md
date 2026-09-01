@@ -138,6 +138,43 @@ later.
 - `delete_doc` already cascades attached Files (`model/delete_doc.py:189`) — an `on_trash` that
   deletes them is redundant.
 
+## Request body size is NOT `System Settings.max_file_size`
+
+`app.py:206` gives **every path except `/api/method/upload_file`** a
+`request.max_content_length` of `conf.max_file_size` (site_config, in **bytes**) or 25 MB. So a
+custom whitelisted upload endpoint is capped there and Werkzeug 413s the body **before your
+function is entered** — raising `System Settings.max_file_size` (which is in **MB**, and only feeds
+`get_max_file_size()` for `upload_file` and `File.check_max_file_size`) changes nothing for you.
+
+Two units, two places, and the one the UI exposes is the one that does not apply. On top of that a
+base64 body inflates the bytes by 4/3, so a 25 MB transport cap carries ~18.7 MB of actual file.
+
+Consequences:
+- Compute the real cap as `min(get_max_file_size(), (transport - envelope) * 3 // 4)` and
+  **pre-check it in the browser** — otherwise the user gets a bare 413 with no message, since a
+  413 never reaches your `frappe.throw`.
+- Verify by asserting the computed number, not by uploading: a passing small file proves nothing
+  about where the ceiling is.
+
+## Public files are same-origin, so the extension allowlist IS the XSS control
+
+Anything stored via a public `File` is served from the site's own origin. `File.validate_file_extension`
+checks `System Settings.allowed_file_extensions` and **returns early when that is unset** (blank
+means allow-all), and it only runs `if frappe.request`. If your endpoint accepts arbitrary types,
+own an allowlist of your own and make blank mean *your defaults*, never *everything* — `.svg` and
+`.html` carrying a `<script>` are stored XSS against every later visitor.
+
+Magic-byte sniffing is still worth it for formats you can recognise, but it can only ever *confirm*
+an extension, never derive one for a format you do not know. Map extension → container family
+(mp4/mov/m4v/avif are all ISO-BMFF `ftyp`; mkv/webm are both EBML) and reject a mismatch.
+
+## Adding a field to an existing Single does not apply its default
+
+A Single's field defaults are applied when the doc is first created. Add a field to a doctype whose
+Single row already exists and `migrate` leaves it **NULL** — the JSON says `"default": "168"` and
+the site reads `None`. Seed it with a patch, and have the code fall back to a module constant so a
+blank never silently means zero.
+
 ## Committing from a read path
 
 Never call `frappe.db.commit()` in a GET handler — it commits the caller's entire ambient

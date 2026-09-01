@@ -14,9 +14,10 @@ class ClipboardSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		max_image_size_mb: DF.Float
+		allowed_file_types: DF.SmallText | None
 		max_items_per_room: DF.Int
 		max_text_size_kb: DF.Int
+		max_validity_hours: DF.Int
 		validity_hours: DF.Int
 		writes_per_minute_per_ip: DF.Int
 	# end: auto-generated types

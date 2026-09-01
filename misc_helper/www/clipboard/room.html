@@ -10,26 +10,58 @@
    include_script() macro built on it) only content-hashes real *.bundle.js files, so a raw file
    like this gets no cache-busting for free. Without the ?v= query, browsers can keep serving a
    cached copy across deploys indefinitely; bump it whenever this file changes. #}
-<script defer src="/assets/misc_helper/js/clipboard_room.js?v=2"></script>
+<script defer src="/assets/misc_helper/js/clipboard_room.js?v=4"></script>
 <script defer src="/assets/misc_helper/js/alpine.min.js"></script>
 {% endblock %}
 
 {% block page_content %}
 <div
 	class="cb-page bg-surface-base text-ink-base py-6"
-	x-data='clipboard_room({{ {"room": room, "expires_in_seconds": expires_in_seconds, "labels": labels} | json | e }})'
+	x-data='clipboard_room({{ {"room": room, "expires_in_seconds": expires_in_seconds, "labels": labels, "video_file_types": video_file_types} | json | e }})'
 	@paste.window="add_from_paste($event)"
+	@keydown.window.ctrl.c="copy_latest($event)"
+	@keydown.window.meta.c="copy_latest($event)"
+	@dragenter.window.prevent="drag_depth++"
+	@dragleave.window.prevent="drag_depth--"
+	@dragover.window.prevent
+	@drop.window.prevent="add_dropped_files($event)"
 >
+	{# Pointer-events off so the overlay never eats the drop it is advertising. #}
+	<div
+		class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-surface-base/85"
+		x-show="is_dragging"
+		x-cloak
+	>
+		<div class="cb-card border-2 border-dashed px-8 py-6 text-center">
+			{{ icon("paperclip", "w-6 h-6 mx-auto text-ink-muted") }}
+			<p class="mt-2 text-sm font-medium text-ink-strong">{{ _("Drop to add to this room") }}</p>
+			<p class="mt-1 text-xs text-ink-muted">{{ allowed_file_types | join(" · ") | e }}</p>
+		</div>
+	</div>
 	<div class="mx-auto w-full max-w-3xl px-4">
 
 		<div class="grid gap-4 md:grid-cols-4">
 			<div class="md:col-span-3">
 				<h1 class="text-2xl font-semibold tracking-tight break-words text-ink-strong">{{ room.room_name | e }}</h1>
 				<p class="mt-1 text-sm break-all text-ink-muted">{{ room_url | e }}</p>
-				<p class="cb-chip mt-2">
-					{{ icon("clock", "w-3.5 h-3.5") }}
-					<span x-text="expiry_label"></span>
-				</p>
+				<div class="mt-2 flex flex-wrap items-center gap-2">
+					<p class="cb-chip">
+						{{ icon("clock", "w-3.5 h-3.5") }}
+						<span x-text="expiry_label"></span>
+					</p>
+					<label class="flex items-center gap-1.5 text-xs text-ink-muted">
+						{{ _("Delete after") }}
+						<select
+							class="cb-field !h-7 !w-auto !py-0 text-xs"
+							x-model.number="validity_hours"
+							@change="save_validity()"
+						>
+							{% for option in validity_options %}
+							<option value="{{ option.hours }}">{{ option.label }}</option>
+							{% endfor %}
+						</select>
+					</label>
+				</div>
 
 				{% if room.is_weak_name %}
 				<div class="cb-alert mt-3">
@@ -76,10 +108,11 @@
 					{{ _("Send") }}
 				</button>
 				<label class="cb-btn cb-btn-secondary cursor-pointer">
-					{{ icon("image") }}
-					{{ _("Add image") }}
-					<input type="file" accept="image/*" class="hidden" @change="add_picked_image($event)">
+					{{ icon("paperclip") }}
+					{{ _("Add files") }}
+					<input type="file" accept="{{ accept_attribute | e }}" multiple class="hidden" @change="add_picked_files($event)">
 				</label>
+				<span class="text-xs text-ink-muted">{{ _("or drop them anywhere on this page") }}</span>
 				<span class="text-sm text-ink-muted" x-show="is_busy" x-cloak>{{ _("Sending…") }}</span>
 			</div>
 			<div class="cb-alert cb-alert-danger mt-3" x-show="error_message" x-cloak>
@@ -96,10 +129,19 @@
 				<a href="{{ item.file_url | e }}" target="_blank" rel="noopener">
 					<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
 				</a>
+				{% elif item.item_type == "File" %}
+				{% if item.file_type in video_file_types %}
+				<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" src="{{ item.file_url | e }}"></video>
+				{% else %}
+				<a class="cb-btn cb-btn-secondary" href="{{ item.file_url | e }}" download>
+					{{ icon("download") }}
+					{{ item.file_name | e }}
+				</a>
+				{% endif %}
 				{% else %}
 				<pre class="max-h-64 overflow-auto font-mono text-sm break-words whitespace-pre-wrap text-ink-strong">{{ item.content | e }}</pre>
 				{% endif %}
-				<p class="mt-2 text-xs text-ink-muted">{{ item.file_name | e if item.item_type == "Image" else _("Text") }}</p>
+				<p class="mt-2 text-xs text-ink-muted">{{ _("Text") if item.item_type == "Text" else item.file_name | e }}</p>
 			</li>
 			{% endfor %}
 		</ul>
@@ -110,6 +152,15 @@
 					<template x-if="item.item_type === 'Image'">
 						<a :href="item.file_url" target="_blank" rel="noopener">
 							<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-lg border border-outline-subtle">
+						</a>
+					</template>
+					<template x-if="item.item_type === 'File' && is_video(item)">
+						<video controls preload="metadata" class="max-h-64 w-full rounded-lg border border-outline-subtle" :src="item.file_url"></video>
+					</template>
+					<template x-if="item.item_type === 'File' && !is_video(item)">
+						<a class="cb-btn cb-btn-secondary max-w-full" :href="item.file_url" download>
+							{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
+							<span class="truncate" x-text="item.file_name"></span>
 						</a>
 					</template>
 					<template x-if="item.item_type === 'Text'">
@@ -147,7 +198,7 @@
 			<div class="cb-card border-dashed p-6 text-center">
 				<p class="text-sm font-medium text-ink-strong">{{ _("Nothing here yet.") }}</p>
 				<p class="mt-1 text-sm text-ink-muted">
-					{{ _("Paste with Ctrl+V, or type above. Everything in this room is deleted") }}
+					{{ _("Paste with Ctrl+V, drop a file anywhere, or type above. Ctrl+C copies the newest item back out. Everything in this room is deleted") }}
 					<span x-text="expiry_label"></span>.
 				</p>
 			</div>

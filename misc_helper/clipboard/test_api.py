@@ -2,17 +2,23 @@
 # See license.txt
 
 import os
+from unittest.mock import patch
 
 import frappe
 from frappe.utils import get_files_path
-from frappe.utils.data import add_to_date, cint, flt, get_datetime, now_datetime
+from frappe.utils.data import add_to_date, cint, get_datetime, now_datetime
 
 from misc_helper.clipboard.api import (
-	add_image,
+	DEFAULT_TRANSPORT_BYTES,
+	JSON_ENVELOPE_BYTES,
+	add_file,
 	add_text,
 	delete_item,
+	get_max_file_bytes,
 	get_room,
+	get_room_validity_hours,
 	get_settings,
+	set_validity,
 )
 from misc_helper.clipboard.test_base import ClipboardTestBase
 
@@ -94,6 +100,58 @@ class TestRoomLifecycle(ClipboardTestBase):
 		validity_hours = cint(get_settings().validity_hours)
 		expected_expiry = add_to_date(now_datetime(), hours=validity_hours)
 		self.assertLess(abs((new_expiry - expected_expiry).total_seconds()), 60)
+
+
+class TestValidity(ClipboardTestBase):
+	def test_room_inherits_the_site_default_and_can_override_it(self):
+		room_name = self.make_room_name()
+		with self.temporary_settings(validity_hours=24):
+			get_room(room_name)
+			self.assertEqual(get_room_validity_hours(room_name), 24)
+
+			set_validity(room_name, 6)
+			self.assertEqual(get_room_validity_hours(room_name), 6)
+
+	def test_setting_validity_moves_the_expiry_immediately(self):
+		room_name = self.make_room_name()
+		get_room(room_name)
+
+		set_validity(room_name, 1)
+
+		expires_on = get_datetime(frappe.db.get_value("Clipboard", room_name, "expires_on"))
+		self.assertLess(expires_on, add_to_date(now_datetime(), hours=2))
+		self.assertGreater(expires_on, now_datetime())
+
+	def test_one_room_cannot_retune_another(self):
+		"""The reason this is per-room rather than a guest setter on Clipboard Settings: rooms
+		are public and guessable, so a site-wide setter would hand every stranger the dial."""
+		first_room = self.make_room_name("first")
+		second_room = self.make_room_name("second")
+		get_room(first_room)
+		get_room(second_room)
+
+		set_validity(first_room, 1)
+
+		self.assertEqual(get_room_validity_hours(second_room), cint(get_settings().validity_hours))
+
+	def test_validity_outside_the_cap_is_rejected(self):
+		room_name = self.make_room_name()
+		get_room(room_name)
+
+		with self.temporary_settings(max_validity_hours=48):
+			self.assertRaises(frappe.ValidationError, set_validity, room_name, 49)
+			self.assertRaises(frappe.ValidationError, set_validity, room_name, 0)
+			self.assertRaises(frappe.ValidationError, set_validity, room_name, -1)
+
+	def test_lowering_the_cap_shortens_rooms_already_set_above_it(self):
+		"""Clamped on read, not on write -- otherwise a room set to 7 days before the cap
+		dropped would stay grandfathered past the new limit forever."""
+		room_name = self.make_room_name()
+		get_room(room_name)
+		set_validity(room_name, 168)
+
+		with self.temporary_settings(max_validity_hours=24):
+			self.assertEqual(get_room_validity_hours(room_name), 24)
 
 
 class TestRoomNameValidation(ClipboardTestBase):
@@ -208,7 +266,7 @@ class TestDeleteItem(ClipboardTestBase):
 		)
 
 
-class TestAddImage(ClipboardTestBase):
+class TestAddFile(ClipboardTestBase):
 	def get_stored_file(self, item_name: str) -> str:
 		return frappe.db.get_value(
 			"File", {"attached_to_doctype": "Clipboard Item", "attached_to_name": item_name}, "name"
@@ -218,7 +276,7 @@ class TestAddImage(ClipboardTestBase):
 		room_name = self.make_room_name()
 		image_bytes = self.make_image_bytes()
 
-		item = add_image(room_name, "screenshot.png", self.encode(image_bytes))
+		item = add_file(room_name, "screenshot.png", self.encode(image_bytes))
 
 		self.assertEqual(item["item_type"], "Image")
 		self.assertEqual(item["file_size"], len(image_bytes))
@@ -228,7 +286,7 @@ class TestAddImage(ClipboardTestBase):
 	def test_stored_file_is_public_with_a_hashed_name(self):
 		room_name = self.make_room_name()
 
-		item = add_image(room_name, "screenshot.png", self.encode(self.make_image_bytes()))
+		item = add_file(room_name, "screenshot.png", self.encode(self.make_image_bytes()))
 
 		stored_file = frappe.db.get_value(
 			"File",
@@ -244,7 +302,7 @@ class TestAddImage(ClipboardTestBase):
 	def test_path_traversal_file_name_does_not_escape_the_files_directory(self):
 		room_name = self.make_room_name()
 
-		item = add_image(room_name, "../../etc/passwd.png", self.encode(self.make_image_bytes()))
+		item = add_file(room_name, "../../etc/passwd.png", self.encode(self.make_image_bytes()))
 
 		stored_file_name = frappe.db.get_value("File", self.get_stored_file(item["name"]), "file_name")
 		self.assertRegex(stored_file_name, r"^[a-f0-9]{32}\.png$")
@@ -263,33 +321,93 @@ class TestAddImage(ClipboardTestBase):
 		room_name = self.make_room_name()
 		payload = self.encode(b"<?php system($_GET['c']); ?>" * 4)
 
-		self.assertRaises(frappe.ValidationError, add_image, room_name, "innocent.png", payload)
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "innocent.png", payload)
 
 		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 0)
 
 	def test_empty_and_malformed_payloads_are_rejected(self):
 		room_name = self.make_room_name()
 
-		self.assertRaises(frappe.ValidationError, add_image, room_name, "a.png", "")
-		self.assertRaises(frappe.ValidationError, add_image, room_name, "a.png", "not base64 !!!")
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "a.png", "")
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "a.png", "not base64 !!!")
 
 	def test_size_cap_is_applied_to_the_decoded_bytes(self):
 		room_name = self.make_room_name()
+		cap_bytes = 2048
 
-		# 2048 decoded bytes; base64 of that is ~2732 chars, so a cap applied to the encoded
-		# string instead of the decoded bytes would reject the at-limit image below.
-		with self.temporary_settings(max_image_size_mb=2048 / (1024 * 1024)):
-			cap_bytes = int(flt(get_settings().max_image_size_mb) * 1024 * 1024)
+		# base64 of 2048 bytes is ~2732 chars, so a cap measured on the encoded string instead of
+		# the decoded bytes would reject the at-limit file below.
+		with patch("misc_helper.clipboard.api.get_max_file_bytes", return_value=cap_bytes):
 			at_limit = self.encode(self.make_image_bytes(cap_bytes))
 			self.assertGreater(len(at_limit), cap_bytes, "test payload does not exercise the distinction")
 
-			item = add_image(room_name, "at-limit.png", at_limit)
+			item = add_file(room_name, "at-limit.png", at_limit)
 			self.assertEqual(item["file_size"], cap_bytes)
 
 			over_limit = self.encode(self.make_image_bytes(cap_bytes + 1))
-			self.assertRaises(frappe.ValidationError, add_image, room_name, "over.png", over_limit)
+			self.assertRaises(frappe.ValidationError, add_file, room_name, "over.png", over_limit)
 
 		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 1)
+
+	def test_max_file_bytes_is_bounded_by_the_transport_cap_not_the_system_setting(self):
+		"""Werkzeug rejects an over-long body before this module runs (app.py:206), so raising
+		only System Settings.max_file_size would advertise a limit that 413s in practice."""
+		with self.change_settings("System Settings", {"max_file_size": 512}):
+			max_file_bytes = get_max_file_bytes()
+
+		self.assertEqual(max_file_bytes, (DEFAULT_TRANSPORT_BYTES - JSON_ENVELOPE_BYTES) * 3 // 4)
+		self.assertLess(max_file_bytes, 512 * 1024 * 1024)
+		# Below the transport cap, because base64 inflates the body by a third.
+		self.assertLess(max_file_bytes, DEFAULT_TRANSPORT_BYTES)
+
+	def test_video_is_stored_as_a_file_item_not_an_image(self):
+		room_name = self.make_room_name()
+		# A minimal ISO base media header: a size-prefixed `ftyp` box is always the first box.
+		video_bytes = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
+
+		item = add_file(room_name, "clip.mp4", self.encode(video_bytes))
+
+		self.assertEqual(item["item_type"], "File")
+		self.assertEqual(item["file_type"], "MP4")
+		stored_file_name = frappe.db.get_value("File", self.get_stored_file(item["name"]), "file_name")
+		self.assertRegex(stored_file_name, r"^[a-f0-9]{32}\.mp4$")
+
+	def test_type_outside_the_allowlist_is_rejected(self):
+		"""SVG is the one that matters: these files are served public from this site's own
+		origin, so an SVG carrying a script would be stored XSS against every later visitor."""
+		room_name = self.make_room_name()
+		payload = self.encode(b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
+
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "logo.svg", payload)
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "shell.php", payload)
+		self.assertRaises(frappe.ValidationError, add_file, room_name, "noextension", payload)
+
+		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 0)
+
+	def test_allowlist_is_read_from_settings_not_frozen_in_code(self):
+		room_name = self.make_room_name()
+		payload = self.encode(self.make_image_bytes())
+
+		with self.temporary_settings(allowed_file_types="MP4"):
+			self.assertRaises(frappe.ValidationError, add_file, room_name, "shot.png", payload)
+
+		item = add_file(room_name, "shot.png", payload)
+		self.assertEqual(item["file_type"], "PNG")
+
+	def test_bytes_must_match_the_extension_they_claim(self):
+		"""The extension is what the allowlist checks, so a trusted extension over untrusted
+		bytes would be the way around it for every format we can actually recognise."""
+		room_name = self.make_room_name()
+
+		self.assertRaises(
+			frappe.ValidationError, add_file, room_name, "innocent.mp4", self.encode(b"<html>hi</html>")
+		)
+		# A real PNG renamed to .mp4 is still a mismatch: it would be served as a video.
+		self.assertRaises(
+			frappe.ValidationError, add_file, room_name, "shot.mp4", self.encode(self.make_image_bytes())
+		)
+
+		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 0)
 
 	def test_same_image_in_two_rooms_gets_independent_file_docs(self):
 		"""Regression: the File used to be inserted before `attached_to_*` was set, so
@@ -299,8 +417,8 @@ class TestAddImage(ClipboardTestBase):
 		second_room = self.make_room_name("second")
 		payload = self.encode(self.make_image_bytes())
 
-		first_item = add_image(first_room, "shared.png", payload)
-		second_item = add_image(second_room, "shared.png", payload)
+		first_item = add_file(first_room, "shared.png", payload)
+		second_item = add_file(second_room, "shared.png", payload)
 
 		first_file = self.get_stored_file(first_item["name"])
 		second_file = self.get_stored_file(second_item["name"])
@@ -321,7 +439,7 @@ class TestAddImage(ClipboardTestBase):
 
 	def test_deleting_an_image_item_deletes_its_file(self):
 		room_name = self.make_room_name()
-		item = add_image(room_name, "screenshot.png", self.encode(self.make_image_bytes()))
+		item = add_file(room_name, "screenshot.png", self.encode(self.make_image_bytes()))
 		file_name = self.get_stored_file(item["name"])
 		on_disk_path = self.get_on_disk_path(item["file_url"])
 		self.assertTrue(os.path.exists(on_disk_path))
@@ -419,12 +537,12 @@ class TestWhitelisting(ClipboardTestBase):
 	GET is caught."""
 
 	def test_endpoints_are_reachable_by_a_guest(self):
-		for method in (get_room, add_text, add_image, delete_item):
+		for method in (get_room, add_text, add_file, delete_item, set_validity):
 			with self.subTest(method=method.__name__), self.set_user("Guest"):
 				frappe.is_whitelisted(method)
 
 	def test_writes_are_post_only_and_reads_are_not(self):
-		for method in (add_text, add_image, delete_item):
+		for method in (add_text, add_file, delete_item, set_validity):
 			with self.subTest(method=method.__name__):
 				self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ("POST",))
 
@@ -438,7 +556,7 @@ class TestWhitelisting(ClipboardTestBase):
 
 		# Deliberate: none of these takes free text -- room_name and file_name are re-derived
 		# through strict filters, item_name is a hash id, base64 has nothing to sanitise.
-		for method in (get_room, add_image, delete_item):
+		for method in (get_room, add_file, delete_item, set_validity):
 			with self.subTest(method=method.__name__):
 				self.assertNotIn(method, frappe.xss_safe_methods)
 

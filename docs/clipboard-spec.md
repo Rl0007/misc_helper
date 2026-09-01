@@ -34,11 +34,17 @@ No existing tool combines all five.
 
 ## 4. Scope
 
-**In (v1):** named public rooms · text items · image items · live sync · copy to clipboard ·
-delete item · auto-expiry · QR code · settings singleton.
+**In (v1):** named public rooms · text items · image items · **any allowlisted file type,
+dropped anywhere on the page** · live sync · copy to clipboard · delete item · auto-expiry,
+**retunable per room from the page itself** · QR code · settings singleton.
 
-**Out (v1), deliberately:** passcodes, private rooms, arbitrary file types, edit-in-place,
-markdown rendering, per-item expiry, room listing/discovery.
+**Out (v1), deliberately:** passcodes, private rooms, edit-in-place, markdown rendering,
+per-item expiry, room listing/discovery.
+
+**Amended 2026-09-01.** Arbitrary file types moved from Out to In, with the allowlist in
+`Clipboard Settings` (§6.3) and a hard ceiling of ~18.7 MB per file that comes from the transport,
+not from any setting (§7.4). Chunked upload stays out: it is the only way past that ceiling and it
+is a separate build.
 
 Passcode and private rooms are the intended v2. The v1 doctype carries **no** `passcode_hash`
 column — dead columns are worse than a later migration. Frappe's own login is the likely v2
@@ -69,6 +75,7 @@ Naming: `autoname: field:room_name` — the doc name **is** the URL segment.
 | Field | Type | Notes |
 |---|---|---|
 | `room_name` | Data, unique, reqd | Slugified. Validated `^[a-z0-9][a-z0-9-]{2,40}$` |
+| `validity_hours` | Int | This room's own window. Seeded from Settings, set from the page (§7.7) |
 | `expires_on` | Datetime, read-only | Set on create; slides on every write |
 | `last_activity` | Datetime, read-only | |
 
@@ -80,11 +87,12 @@ All real access is through the guest API in §7, which owns its own authorizatio
 | Field | Type | Notes |
 |---|---|---|
 | `clipboard` | Link → Clipboard, reqd | Indexed |
-| `item_type` | Select: `Text` / `Image`, reqd | |
+| `item_type` | Select: `Text` / `Image` / `File`, reqd | `Image` gets a thumbnail and a real image copy; `File` gets a `<video>` or a download card |
 | `content` | Long Text | Text items only |
-| `file_url` | Data | Image items only |
-| `file_name` | Data | Image items only |
-| `file_size` | Int | Bytes, image items only |
+| `file_type` | Data | Uppercase extension. Decides `<img>` vs `<video>` vs download card |
+| `file_url` | Data | File items only |
+| `file_name` | Data | File items only |
+| `file_size` | Int | Bytes, file items only |
 
 `on_trash` deletes the attached File doc so no orphans survive.
 
@@ -93,10 +101,20 @@ All real access is through the guest API in §7, which owns its own authorizatio
 | Field | Type | Default |
 |---|---|---|
 | `validity_hours` | Int | 24 |
+| `max_validity_hours` | Int | 168 |
 | `max_items_per_room` | Int | 200 |
-| `max_image_size_mb` | Float | 5 |
 | `max_text_size_kb` | Int | 100 |
 | `writes_per_minute_per_ip` | Int | 30 |
+| `allowed_file_types` | Small Text | images + video, one per line |
+
+`max_image_size_mb` was **removed**, not left unused: per-file size now comes from the transport
+cap (§7.4), and a settings field that no longer controls anything is a trap for the next reader.
+
+`allowed_file_types` blank means *the defaults in `api.DEFAULT_FILE_TYPES`*, deliberately not
+*allow everything* — the opposite of Frappe's own `System Settings.allowed_file_extensions`
+convention. These files are served public from this site's own origin, so an accidentally emptied
+field must not silently start accepting `.svg` and `.html`. **SVG is absent from the defaults**
+for exactly that reason.
 
 ## 7. Backend — `misc_helper/clipboard/api.py`
 
@@ -117,15 +135,31 @@ Reject empty content and content over `max_text_size_kb`. Reject if the room is 
 ### 7.3 `delete_item(room_name, item_name)`
 Verify the item actually belongs to that room before deleting — never trust the item name alone.
 
-### 7.4 `add_image(room_name, file_name, data_base64)`
+### 7.4 `add_file(room_name, file_name, data_base64)`
 **Our own endpoint, not Frappe's `upload_file`** — Frappe's requires the site-wide
 `allow_guests_to_upload_files` setting, which would open guest uploads for every doctype on
 the site (`frappe/handler.py:135`). We keep that off and own the limits here instead.
 
-Steps: decode base64 → enforce `max_image_size_mb` on the **decoded** bytes → validate the
-magic bytes are a real image (png/jpeg/gif/webp), not just a trusted extension → create a
-`File` with `is_private = 0` and a `frappe.generate_hash()` filename → create the
-`Clipboard Item` → slide expiry → publish.
+Steps: decode base64 → enforce the size cap on the **decoded** bytes → take the extension from
+the supplied name and check it against `allowed_file_types` → confirm the magic bytes really are
+that container family, not just a trusted extension → create a `File` with `is_private = 0` and a
+`frappe.generate_hash()` filename → create the `Clipboard Item` (`Image` for image types, `File`
+otherwise) → slide expiry → publish.
+
+**The size cap is the transport, not a setting.** `app.py:206` gives every path except
+`/api/method/upload_file` a `max_content_length` of `conf.max_file_size` (bytes) or 25 MB, so
+Werkzeug 413s an over-long body *before this module is entered* — raising
+`System Settings.max_file_size` (MB, and only consulted by `upload_file` and
+`File.check_max_file_size`) changes nothing here. Base64 then inflates the payload by 4/3. So
+`get_max_file_bytes()` returns `min(get_max_file_size(), (transport − envelope) × ¾)`, which on a
+default bench is **18.7 MB**. The browser pre-checks against the same number, because a 413 never
+reaches `frappe.throw` and would otherwise surface as nothing at all.
+
+**Why the extension is the control.** We can only sniff formats we know. Mapping extension →
+container family (mp4/mov/m4v/avif → ISO-BMFF `ftyp`; mkv/webm → EBML; RIFF → WEBP or AVI) catches
+every mismatch among the defaults, but a type added to `allowed_file_types` later gets no byte
+check — there is no honest one to make. That addition is the moment to think about what the site
+will then serve from its own origin.
 
 > **Why public files:** Frappe permission-checks private files against their attached doc, so a
 > guest could never load one. A public file with an unguessable hashed name matches the trust
@@ -148,6 +182,14 @@ so `frappe.realtime.on()` works on a portal page with no login and no permission
 socket on the site, so it must never carry content. It is a bare "something changed" ping;
 the client re-fetches through `get_room`, which is the single place authorization lives.
 This keeps us correct today and still correct after v2 adds passcodes.
+
+### 7.7 `set_validity(room_name, validity_hours)`
+
+Per-room, **not** a guest setter on `Clipboard Settings.validity_hours`. Rooms are public and
+guessable by design (§5), so a site-wide setter would hand every stranger the dial for every other
+room on the site. Clamped to `max_validity_hours`, and clamped again **on read** in
+`get_room_validity_hours` — lowering the cap must shorten rooms already set above it rather than
+grandfathering them past the new limit.
 
 ### 7.6 Scheduled cleanup — `misc_helper/clipboard/cleanup.py`
 Daily via `scheduler_events`. Delete every `Clipboard` past `expires_on` and cascade to its
@@ -224,7 +266,17 @@ the Tailwind scanner drops them.
 large paste box · item list, newest first.
 
 - A document-level `paste` handler, so <kbd>Ctrl+V</kbd> works anywhere on the page without
-  focusing anything. Text → `add_text`. Image blob → base64 → `add_image`.
+  focusing anything. Text → `add_text`. Any pasted file → base64 → `add_file`.
+- A window-level `drop` handler with a full-page overlay, so a file can be dropped anywhere.
+  `dragenter`/`dragleave` are counted, not toggled — they also fire crossing each child element,
+  and a boolean flickers the overlay mid-drag. Multiple files upload **sequentially**: each one
+  slides the expiry, publishes a ping, and counts against the per-room rate limit.
+- <kbd>Ctrl+C</kbd> copies the newest item, so a phone→laptop handoff is paste, switch machine,
+  copy. It stands down when there is a real selection or a focused field — silently hijacking
+  Ctrl+C over selected text would lose what the user meant to take.
+- A **Delete after** select (1h/6h/12h/1d/3d/7d) calling `set_validity`. Options are built and
+  translated server-side in `room.py`; duration labels do not survive being assembled from a
+  number at runtime, because plural rules differ per language.
 - Typed text plus a Send button, for the phone case where there is nothing to paste.
 - Per item: **Copy** (`navigator.clipboard.writeText`, or `ClipboardItem` for images) with a
   brief "Copied" state, and **Delete**.
@@ -272,4 +324,13 @@ All three confirmed by Rahul; the build proceeds on these.
    UI shows a one-line caution. Rejecting names would break the "say it out loud" property that
    is the whole point of the feature.
 
-**Status:** spec approved, build in progress.
+### 12.1 Decisions — settled 2026-09-01
+
+4. **Arbitrary file types** — **extension allowlist in Settings**, seeded with images + video,
+   SVG deliberately excluded. Magic-byte confirmation for every family we can recognise.
+5. **Size ceiling** — **left at the 25 MB transport default (~18.7 MB per file)**. Raising it is a
+   one-line `conf.max_file_size` change that the code follows automatically; going far past
+   ~200 MB needs the chunked endpoint, because the whole body is buffered in the worker's memory.
+6. **Configurable purge time** — **per room**, for the reason in §7.7.
+
+**Status:** spec approved, v1 built. §12.1 amendments built and verified 2026-09-01.

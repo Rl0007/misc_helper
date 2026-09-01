@@ -8,6 +8,7 @@
   "clipboard",
   "item_type",
   "content",
+  "file_type",
   "file_url",
   "file_name",
   "file_size"
@@ -27,7 +28,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Item Type",
-   "options": "Text\nImage",
+   "options": "Text\nImage\nFile",
    "reqd": 1
   },
   {
@@ -50,6 +51,12 @@
    "fieldname": "file_size",
    "fieldtype": "Int",
    "label": "File Size"
+  },
+  {
+   "description": "Uppercase extension, so the page can pick an <img>, a <video>, or a download card.",
+   "fieldname": "file_type",
+   "fieldtype": "Data",
+   "label": "File Type"
   }
  ],
  "grid_page_length": 50,
