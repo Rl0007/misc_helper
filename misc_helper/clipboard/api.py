@@ -22,6 +22,12 @@ if TYPE_CHECKING:
 	from misc_helper.clipboard.doctype.clipboard_item.clipboard_item import ClipboardItem
 	from misc_helper.clipboard.doctype.clipboard_settings.clipboard_settings import ClipboardSettings
 
+# GUEST ACCESS: every endpoint below is `allow_guest=True` on purpose -- an unauthenticated
+# clipboard you reach by saying a room name out loud is the entire product (spec §5), so there is
+# no user to check permissions against. Authorization is the room name itself, which is why each
+# endpoint re-derives it through `get_valid_room_name` instead of trusting the caller, and why
+# realtime pings carry no content. Semgrep's `guest-whitelisted-method` is an advisory "did you
+# mean this?", so each decorator carries a `# nosemgrep` on the line above pointing back here.
 ROOM_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,40}$")
 
 # Names a stranger is likely to type independently, so two unrelated people land in one room.
@@ -152,6 +158,7 @@ def get_writes_per_minute() -> int:
 	return cint(get_settings().writes_per_minute_per_ip)
 
 
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True)
 def get_room(room_name: str) -> dict:
 	"""Return the room and its items, newest first. Creates the room if it is absent or expired."""
@@ -175,6 +182,7 @@ def get_room(room_name: str) -> dict:
 
 # `list` is deliberately unparameterised: Frappe type-checks whitelisted arguments before the body
 # runs, and list[str] would reject the entire call over one null a stale local sidebar sent.
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True)
 def get_rooms(room_names: str | list | None = None) -> list[dict]:
 	"""Sidebar summaries for rooms the caller already knows the names of.
@@ -279,6 +287,7 @@ def get_preview(text: str | None) -> str:
 # clipboard content the user pasted. The flag lifts that for this endpoint's arguments, so
 # escaping at render time is now the ONLY XSS defence for guest-submitted text, which is this
 # feature's entire user base. Never interpolate `content` unescaped into a template.
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def add_text(
@@ -334,6 +343,7 @@ def add_text(
 # template. The flag costs nothing for the other arguments: room_name and file_name are re-derived
 # through strict patterns below, sender through SENDER_PATTERN, and base64 has no character
 # sanitize_html would touch.
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def add_file(
@@ -403,6 +413,7 @@ def add_file(
 	return get_item_data(item)
 
 
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def delete_item(room_name: str, item_name: str) -> None:
@@ -413,6 +424,7 @@ def delete_item(room_name: str, item_name: str) -> None:
 	save_write(room_name)
 
 
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def set_pinned(room_name: str, item_name: str, is_pinned: bool) -> dict:
@@ -433,6 +445,7 @@ def set_pinned(room_name: str, item_name: str, is_pinned: bool) -> dict:
 # is_whitelisted bleach-sanitises every string in form_dict before this body runs, which would turn
 # "R&D notes" into "R&amp;D notes". Escaping at render time is therefore the only XSS defence for
 # `display_name` -- never interpolate it unescaped into a template.
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def set_room_display_name(room_name: str, display_name: str) -> dict:
@@ -449,6 +462,7 @@ def set_room_display_name(room_name: str, display_name: str) -> dict:
 	return {"room_name": room_name, "display_name": display_name or room_name}
 
 
+# nosemgrep: guest-whitelisted-method -- see GUEST ACCESS above
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def set_validity(room_name: str, validity_hours: int) -> dict:

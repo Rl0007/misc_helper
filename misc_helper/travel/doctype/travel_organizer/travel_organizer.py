@@ -14,7 +14,6 @@ class TravelOrganizer(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-
 	# end: auto-generated types
 
 	_DOCTYPE_NAME = "Travel Organizer"

@@ -341,6 +341,36 @@ request (`app.py:433`).
 - **Do not import preflight** — it strips Frappe's navbar and footer. Without it, Bootstrap's
   list padding survives, so add `list-none pl-0` on `<ul>`s.
 
+## The linter: Biome owns JS, and semgrep needs a reason not a silence
+
+The Frappe app boilerplate ships **prettier + eslint** pre-commit hooks, but this app formats JS
+with **Biome** (`biome.json`, `yarn lint`). Three formatters over the same files can never all be
+satisfied — prettier and Biome disagree on tabs and quote style, so `clipboard_room.js` churned
+~370 lines on every run — and neither boilerplate hook excluded the vendored `alpine.min.js` /
+`socket.io.min.js`, so each run rewrote 6000 lines of minified library and eslint then reported
+`no-func-assign` against them. Both hooks are gone; the `biomejs/pre-commit` hook is the only JS
+tool, pinned to the same version as `package.json`. `.eslintrc` was deleted with them — it was desk
+boilerplate (globals for `cur_frm`, jQuery, Cypress) that this Tailwind/Alpine app never used.
+
+**Keep the pre-commit rev, `package.json`'s `@biomejs/biome`, and `biome.json`'s `$schema` on one
+version.** The hook installs its own copy, so a drifting pin means CI and your machine format
+differently and the diff flip-flops per committer.
+
+The linter job also runs **semgrep**, which is not optional-advisory in CI — any finding exits
+non-zero. Two rules fire here by design and both are silenced per-line with a stated reason, which
+is what the rules themselves ask for:
+
+- `guest-whitelisted-method` on all 8 `allow_guest=True` endpoints — a clipboard reached by saying
+  a room name out loud is the product; there is no user to check permissions against. The rationale
+  lives once in the GUEST ACCESS block at the top of `api.py` and each decorator points back to it.
+- `frappe-manual-commit` — the scheduled cleanup job and the test base's settings/teardown, all of
+  which must outlive the per-class rollback.
+
+**Put `# nosemgrep` on the line ABOVE the decorator, never trailing it.** Trailing it pushes the
+line past ruff's 110 columns, ruff-format then splits the decorator across lines, and the comment
+lands on the closing `)` — no longer the line the finding is on, so the silence silently stops
+working and the linter goes red again with the comment still sitting there.
+
 ## Testing
 
 - **`IntegrationTestCase.change_settings` has no `try/finally`** — an assertion failing inside
