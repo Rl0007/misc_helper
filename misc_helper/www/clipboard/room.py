@@ -57,7 +57,7 @@ def get_labels() -> dict:
 		"rich_text_on": _("rich text on"),
 		"link_url": _("Link URL"),
 		"message_copied": _("Message copied"),
-		"image_copied": _("Image copied"),
+		"file_link_copied": _("Link copied — paste it anywhere to share this file"),
 		"link_copied": _("Link copied — anyone with it can join"),
 		"copy_blocked": _("Your browser blocked the copy. Select the text and copy it manually."),
 		"room_created": _("Room created — share the link"),

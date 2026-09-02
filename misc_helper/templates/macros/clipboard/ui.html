@@ -161,7 +161,14 @@
    single send -- the reference draws a multi-file send as one bubble with a grid, not as one
    bubble per file. #}
 {%- macro chat_bubble(icon) -%}
-<div class="group flex items-end gap-2" :class="message.is_mine ? 'flex-row-reverse' : ''">
+<div
+	class="group flex items-end gap-2 rounded-radius transition"
+	:id="`item-${message.item_name}`"
+	:class="[
+		message.is_mine ? 'flex-row-reverse' : '',
+		highlighted_item_name === message.item_name ? 'ring-2 ring-primary' : ''
+	]"
+>
 	{{ avatar("sender_avatar_url(message)", "size-8 rounded-full", "message.sender_name") }}
 	<div class="min-w-0 max-w-xl">
 		<div class="mb-1 flex items-center gap-2 px-1" :class="message.is_mine ? 'flex-row-reverse' : ''">

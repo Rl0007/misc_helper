@@ -120,6 +120,8 @@ document.addEventListener('alpine:init', () => {
 		lightbox: null,
 		toast: '',
 		copied_item_name: '',
+		highlighted_item_name: '',
+		pinned_index: 0,
 
 		rail_expanded: false,
 		// Colours are a set-once preference; the disclosure starts closed and remembers.
@@ -138,6 +140,7 @@ document.addEventListener('alpine:init', () => {
 		drag_depth: 0,
 		poll_timer: null,
 		toast_timer: null,
+		highlight_timer: null,
 		realtime_event: '',
 		is_settling: true,
 
@@ -391,6 +394,55 @@ document.addEventListener('alpine:init', () => {
 				}
 			}
 			return messages;
+		},
+
+		// Pinned messages ride a banner under the header rather than only carrying a pin icon on
+		// their own bubble -- in a fast room the bubble scrolls away and the pin goes with it.
+		// Newest pin first, which is the one the banner opens on.
+		get pinned_messages() {
+			return this.messages.filter((message) => message.is_pinned).reverse();
+		},
+
+		get pinned_message() {
+			const pinned = this.pinned_messages;
+			return pinned.length ? pinned[this.pinned_index % pinned.length] : null;
+		},
+
+		pinned_preview(message) {
+			if (!message) {
+				return '';
+			}
+			const text =
+				message.text_format === 'Rich'
+					? html_to_text(message.content)
+					: message.content;
+			const preview = (text || '').replace(/\s+/g, ' ').trim();
+			return preview || message.files[0]?.file_name || this.labels.sent_a_file;
+		},
+
+		// One cycling row, not a list: the banner jumps to the pin it is showing and then moves
+		// on to the next one, which is the whole interaction Telegram gives the same control.
+		show_next_pinned() {
+			const pinned = this.pinned_messages;
+			if (!pinned.length) {
+				return;
+			}
+			const message = pinned[this.pinned_index % pinned.length];
+			this.pinned_index = (this.pinned_index + 1) % pinned.length;
+			this.scroll_to_message(message.item_name);
+		},
+
+		scroll_to_message(item_name) {
+			const element = document.getElementById(`item-${item_name}`);
+			if (!element) {
+				return;
+			}
+			element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			this.highlighted_item_name = item_name;
+			clearTimeout(this.highlight_timer);
+			this.highlight_timer = setTimeout(() => {
+				this.highlighted_item_name = '';
+			}, 2000);
 		},
 
 		get members() {
@@ -859,39 +911,33 @@ document.addEventListener('alpine:init', () => {
 			await this.copy_file(item);
 		},
 
+		// Text first, then one URL per attached file. A caption and its picture cannot both ride
+		// the clipboard at once, and the URL is the half that can be pasted anywhere -- a chat
+		// box, a mail, a terminal -- which is what sharing an image out of here means.
 		async copy_message(message) {
 			this.set_copied(message.item_name);
-			if (!message.content && message.files.length === 1) {
-				await this.copy_file(message.files[0]);
-				return;
-			}
 			const text =
 				message.text_format === 'Rich'
 					? html_to_text(message.content)
 					: message.content;
-			await this.copy_text(text, this.labels.message_copied);
+			const links = message.files.map((file) => file_link(file));
+			const payload = [text, ...links].filter(Boolean).join('\n');
+			if (!payload) {
+				return;
+			}
+			await this.copy_text(
+				payload,
+				text ? this.labels.message_copied : this.labels.file_link_copied,
+			);
 		},
 
+		// Deliberately the link and never the bytes, images included: an image blob on the
+		// clipboard only pastes into apps that accept one, and it cannot be shared as a link.
 		async copy_file(file) {
 			if (!file) {
 				return;
 			}
-			const file_url = new URL(file.file_url, window.location.origin).href;
-			if (!this.is_image(file)) {
-				// A video or archive is not a clipboard flavour any OS would paste, so the useful
-				// thing to hand over is the link to it.
-				await this.copy_text(file_url, this.labels.link_copied);
-				return;
-			}
-			try {
-				const blob = await (await fetch(file_url)).blob();
-				await navigator.clipboard.write([
-					new ClipboardItem({ [blob.type]: blob }),
-				]);
-				this.notify(this.labels.image_copied);
-			} catch {
-				await this.copy_text(file_url, this.labels.link_copied);
-			}
+			await this.copy_text(file_link(file), this.labels.file_link_copied);
 		},
 
 		async copy_text(text, message) {
@@ -1131,6 +1177,10 @@ async function write_to_clipboard(text) {
 	const copied = document.execCommand('copy');
 	scratch.remove();
 	return copied;
+}
+
+function file_link(file) {
+	return new URL(file.file_url, window.location.origin).href;
 }
 
 function release_preview(attachment) {

@@ -201,6 +201,28 @@
 			</p>
 			{% endif %}
 
+			{# Pinned messages get a banner under the header, the way Telegram does it: the pin
+			   icon on the bubble itself scrolls out of the room with the bubble. Clicking the
+			   banner jumps to the pin it is showing, then cycles to the next one. #}
+			<div
+				class="flex items-center gap-2 border-b border-outline bg-surface px-3 py-2 md:px-5 dark:border-outline-dark dark:bg-surface-dark-alt"
+				x-show="pinned_message"
+				x-cloak
+			>
+				<span class="shrink-0 text-primary">{{ icon("pin", "size-4") }}</span>
+				<button type="button" class="flex min-w-0 flex-1 flex-col text-left" @click="show_next_pinned()">
+					<span class="flex items-center gap-2">
+						<span class="text-xs font-semibold text-primary">{{ _("Pinned message") }}</span>
+						<span
+							class="font-mono text-[10px] text-on-surface/70 dark:text-on-surface-dark/70"
+							x-text="pinned_messages.length > 1 ? `${(pinned_index % pinned_messages.length) + 1}/${pinned_messages.length}` : ''"
+						></span>
+					</span>
+					<span class="w-full truncate text-xs text-on-surface dark:text-on-surface-dark" x-text="pinned_preview(pinned_message)"></span>
+				</button>
+				{{ icon_button(icon("pin", "size-4"), _("Unpin message"), classes="p-1.5", attrs='@click="toggle_pin(pinned_message)"') }}
+			</div>
+
 			{# `relative` is load-bearing, not decoration: Frappe's bundled .sr-only is
 			   position:absolute, so with no positioned ancestor every per-message screen-reader
 			   label escapes this scroll container, is laid out against the document, and stretches
@@ -339,7 +361,7 @@
 		<img :src="lightbox?.file_url" :alt="lightbox?.file_name" class="max-h-[75vh] max-w-full rounded-radius">
 		<div class="flex items-center gap-2">
 			<span class="font-mono text-xs text-white/70" x-text="lightbox?.file_name"></span>
-			{{ button(label=_("Copy image"), classes="px-3 py-1.5 text-xs", attrs='@click="copy_file(lightbox)"') }}
+			{{ button(label=_("Copy image link"), classes="px-3 py-1.5 text-xs", attrs='@click="copy_file(lightbox)"') }}
 			<button type="button" class="rounded-radius border border-white/30 px-3 py-1.5 text-xs font-semibold text-white" @click="lightbox = null">{{ _("Close") }}</button>
 		</div>
 	</div>
