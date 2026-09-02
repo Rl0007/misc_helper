@@ -56,3 +56,6 @@ jspm_packages/
 
 # node_modules symlinked into public/ would be served as a static asset
 misc_helper/public/node_modules
+
+# Claude Code scratch: session worktrees are separate git repos and must never be committed.
+.claude/worktrees/

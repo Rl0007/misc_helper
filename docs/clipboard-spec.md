@@ -300,9 +300,9 @@ the Tailwind scanner drops them.
 Delete-after select, QR in a popover — then a scrolling item pane reading **oldest first**, then a
 composer docked at the bottom.
 
-- The shell is `h-dvh overflow-hidden` (`dvh`, so the composer is not hidden behind a phone's
-  collapsing URL bar) and only the item pane scrolls. `clipboard_layout.html` exposes
-  `shell_class`/`main_class` blocks for this; every other page keeps ordinary document scrolling.
+- The shell is a fixed-height flex column and only the item pane scrolls. Each page sets its own
+  `context.body_class` (the room `h-screen overflow-hidden`, the landing page `min-h-screen`), which
+  `templates/clipboard_shell.html` renders onto `<body>`.
 - **The item pane must be `position: relative`.** Frappe's bundled `.sr-only` is
   `position: absolute`, so with no positioned ancestor every per-item screen-reader label is laid
   out against the document instead of the pane and stretches it — the page then scrolls behind a
