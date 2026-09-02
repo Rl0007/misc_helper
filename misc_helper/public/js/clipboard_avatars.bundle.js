@@ -25,6 +25,20 @@ const STYLES = {
 	planets: new Style(planets),
 };
 
+// Per-style overrides of the definition's own defaults.
+//
+// `ring` ships probability 45, so barely half of all rooms got Saturn rings and the rail looked
+// inconsistent -- a ring is the most recognisable thing about a planet, so every room gets one.
+// Variant and rotation are still seeded, so rooms stay distinct.
+//
+// `animation` variants all ship weight 0, meaning they are never picked at random and must be
+// asked for by name -- through `animationVariant`, since v10 derives a component's variant option
+// as `${componentName}Variant` (a bare `animation` key is rejected as an unexpected property). The CSS the style emits is already wrapped in
+// `@media (prefers-reduced-motion: no-preference)`, so this respects the OS setting for free.
+const STYLE_OPTIONS = {
+	planets: { ringProbability: 100, animationVariant: ['slow'] },
+};
+
 // Returns null for an unknown style rather than throwing, so a caller can fall back to the HTTP
 // API instead of rendering a broken image.
 window.render_avatar = (style_name, seed) => {
@@ -32,7 +46,7 @@ window.render_avatar = (style_name, seed) => {
 	if (!style) {
 		return null;
 	}
-	return new Avatar(style, { seed }).toDataUri();
+	return new Avatar(style, { seed, ...STYLE_OPTIONS[style_name] }).toDataUri();
 };
 
 // The component re-runs every avatar getter once this lands, because the getters may already have

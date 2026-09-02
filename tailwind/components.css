@@ -79,3 +79,58 @@
 .dark .cb-rich pre {
 	background-color: rgb(255 255 255 / 0.1);
 }
+
+/* Idle motion for the avatars DiceBear cannot animate itself.
+ *
+ * `planets` has an `animation` component and spins on its own (see clipboard_avatars.bundle.js).
+ * `notionists` and `bottts` have no such component in v10 -- they are static SVG -- so the life has
+ * to come from CSS out here.
+ *
+ * Deliberately tiny and slow: a room can hold a dozen avatars beside live-updating text, and
+ * anything faster reads as a page that will not sit still. The mount pop is what you actually
+ * notice; the float is barely perceptible and exists so the page is not dead between messages.
+ *
+ * A CSS animation inside an SVG loaded through <img> still runs, which is why the planets keep
+ * spinning here rather than freezing as a static frame. */
+.cb-avatar {
+	animation:
+		cb-avatar-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+		cb-avatar-float 6s ease-in-out 260ms infinite;
+	transition: transform 150ms ease;
+}
+
+.cb-avatar:hover {
+	animation-play-state: paused;
+	transform: translateY(-2px) scale(1.06);
+}
+
+@keyframes cb-avatar-pop {
+	from {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes cb-avatar-float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-1.5px);
+	}
+}
+
+/* A genuine accessibility preference, unlike colour scheme. DiceBear's own animation CSS is
+ * wrapped in the same query, so this switches off every moving part on the page at once. */
+@media (prefers-reduced-motion: reduce) {
+	.cb-avatar,
+	.cb-avatar:hover {
+		animation: none;
+		transform: none;
+	}
+}

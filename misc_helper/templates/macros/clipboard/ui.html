@@ -24,7 +24,7 @@
    their opaque sender id), so the same person draws the same face for everyone in the room. #}
 {%- macro avatar(src_expr, classes="size-8 rounded-full", alt_expr="''", attrs="") -%}
 <img
-	class="shrink-0 bg-surface-alt object-cover dark:bg-surface-dark {{ classes }}"
+	class="cb-avatar shrink-0 bg-surface-alt object-cover dark:bg-surface-dark {{ classes }}"
 	:src="{{ src_expr }}"
 	:alt="{{ alt_expr }}"
 	{{ attrs | safe }}

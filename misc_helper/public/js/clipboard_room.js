@@ -17,6 +17,7 @@ const ROOMS_STORAGE_KEY = 'clipboard_rooms';
 const THEME_STORAGE_KEY = 'clipboard_theme';
 const BUBBLE_STORAGE_KEY = 'clipboard_bubble';
 const ACCENT_STORAGE_KEY = 'clipboard_accent';
+const APPEARANCE_STORAGE_KEY = 'clipboard_appearance_open';
 const SEEN_STORAGE_KEY = 'clipboard_seen_counts';
 
 const SENDER_PATTERN = /^[a-f0-9]{16,64}$/;
@@ -121,6 +122,8 @@ document.addEventListener('alpine:init', () => {
 		copied_item_name: '',
 
 		rail_expanded: false,
+		// Colours are a set-once preference; the disclosure starts closed and remembers.
+		show_appearance: read_storage(APPEARANCE_STORAGE_KEY, false) === true,
 		show_join: false,
 		show_new_room: false,
 		show_validity: false,
@@ -919,6 +922,11 @@ document.addEventListener('alpine:init', () => {
 				name,
 				...swatch,
 			}));
+		},
+
+		toggle_appearance() {
+			this.show_appearance = !this.show_appearance;
+			write_storage(APPEARANCE_STORAGE_KEY, this.show_appearance);
 		},
 
 		set_bubble_color(name) {

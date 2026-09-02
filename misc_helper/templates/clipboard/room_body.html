@@ -89,9 +89,25 @@
 				</ul>
 			</aside>
 
-			<div class="shrink-0 border-t border-outline p-3 dark:border-outline-dark" x-show="rail_expanded" x-cloak>
-				{{ swatch_grid(_("My bubble"), "bubble_color", "set_bubble_color") }}
-				{{ swatch_grid(_("Accent"), "accent", "set_accent") }}
+			{# Colours are a set-once preference, so they sit behind a disclosure rather than
+			   permanently occupying the bottom of the rail. #}
+			<div class="shrink-0 border-t border-outline dark:border-outline-dark" x-show="rail_expanded" x-cloak>
+				<button
+					type="button"
+					class="flex w-full items-center gap-1.5 px-3 py-2.5 text-[10px] font-semibold tracking-wider text-on-surface/70 uppercase transition hover:text-on-surface-strong dark:text-on-surface-dark/70 dark:hover:text-on-surface-dark-strong"
+					:aria-expanded="show_appearance"
+					@click="toggle_appearance()"
+				>
+					<span
+						class="transition-transform"
+						:class="show_appearance ? 'rotate-90' : ''"
+					>{{ icon("chevron-right", "size-3") }}</span>
+					{{ _("Colours") }}
+				</button>
+				<div class="px-3 pb-1" x-show="show_appearance" x-cloak>
+					{{ swatch_grid(_("My bubble"), "bubble_color", "set_bubble_color") }}
+					{{ swatch_grid(_("Accent"), "accent", "set_accent") }}
+				</div>
 			</div>
 		</div>
 
@@ -269,7 +285,7 @@
 					<span class="ml-auto font-mono text-[10px] text-primary" x-text="labels.rich_text_on"></span>
 				</div>
 
-				<form class="flex items-end gap-2" @submit.prevent="send()">
+				<form class="flex items-center gap-2" @submit.prevent="send()">
 					{{ avatar("my_avatar_url", "hidden size-8 rounded-full sm:block", "me") }}
 
 					<label class="sr-only" for="draft_input">{{ _("Message") }}</label>
