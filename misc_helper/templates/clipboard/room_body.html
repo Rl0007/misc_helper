@@ -1,0 +1,386 @@
+{#
+	The room UI itself, with no document shell around it.
+
+	Kept separate so the standalone shell (templates/clipboard_shell.html) and the base.html page
+	render byte-identical markup -- the difference between the two is the document and the
+	stylesheets it loads, never the page. Whoever includes this must import the macros it uses;
+	see either host template.
+#}
+<div
+	class="flex min-h-0 flex-1 flex-col"
+	x-data='clipboard_room({{ {
+		"room": room,
+		"expires_in_seconds": expires_in_seconds,
+		"image_file_types": image_file_types,
+		"video_file_types": video_file_types,
+		"labels": labels
+	} | json | e }})'
+	@paste.window="add_from_paste($event)"
+	@keydown.window.ctrl.c="copy_latest($event)"
+	@keydown.window.meta.c="copy_latest($event)"
+	{# dragenter/dragleave also fire as the pointer crosses each child element, so a boolean
+	   flickers the overlay off mid-drag. Counting enters against leaves does not. #}
+	@dragenter.window.prevent="drag_depth++"
+	@dragleave.window.prevent="drag_depth--"
+	@dragover.window.prevent
+	@drop.window.prevent="add_dropped_files($event)"
+>
+	<div class="flex min-h-0 flex-1" x-effect="$el.inert = show_join">
+
+		{# ============================= SIDEBAR =============================
+		   Deliberately a local list, not a server listing. Rooms are public and guessable by
+		   design and the name IS the credential (spec §5), so an endpoint enumerating every room
+		   would hand each visitor a working key to everyone else's. #}
+		{# Below md the expanded list overlays the conversation on a scrim; a 288px rail in flow
+		   pushes the whole chat off a 360px screen. From md up it is back in flow, exactly as the
+		   reference has it. #}
+		<div
+			class="fixed inset-0 z-40 bg-black/40 md:hidden"
+			x-show="rail_expanded"
+			x-cloak
+			@click="rail_expanded = false"
+		></div>
+
+		<div
+			class="flex shrink-0 flex-col border-r border-outline bg-surface transition-all dark:border-outline-dark dark:bg-surface-dark-alt"
+			:class="rail_expanded ? 'fixed inset-y-0 left-0 z-50 w-72 md:relative md:z-auto' : 'w-14 md:w-20'"
+		>
+			<aside class="flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto py-4" x-show="!rail_expanded">
+				{{ icon_button(icon("menu", "size-5"), _("Expand rooms"), classes="size-9 p-0", attrs='@click="rail_expanded = true"') }}
+				<template x-for="room in rooms" :key="room.room_name">
+					<button
+						type="button"
+						class="group relative flex size-12 shrink-0 items-center justify-center rounded-radius transition"
+						:class="room.room_name === room_name
+							? 'ring-2 ring-primary ring-offset-2 ring-offset-surface dark:ring-offset-surface-dark-alt'
+							: 'opacity-60 hover:opacity-100'"
+						:title="room.display_name"
+						@click="open_room(room.room_name)"
+					>
+						{{ avatar("room_avatar_url(room)", "size-12 rounded-radius", "room.display_name") }}
+						<span x-show="is_unread(room)" x-cloak class="absolute -top-1 -right-1 size-3 rounded-full bg-danger ring-2 ring-surface dark:ring-surface-dark-alt"></span>
+					</button>
+				</template>
+				<button
+					type="button"
+					class="flex size-12 shrink-0 items-center justify-center rounded-radius border border-dashed border-outline text-2xl leading-none text-on-surface hover:border-primary hover:text-primary dark:border-outline-dark dark:text-on-surface-dark"
+					@click="show_new_room = true"
+				>
+					+
+					<span class="sr-only">{{ _("New room") }}</span>
+				</button>
+			</aside>
+
+			<aside class="flex min-h-0 flex-1 flex-col" x-show="rail_expanded" x-cloak>
+				<div class="flex items-center justify-between px-3 py-4">
+					<div class="flex items-center gap-2">
+						{{ icon_button(icon("chevron-left", "size-4"), _("Collapse rooms"), classes="p-1", attrs='@click="rail_expanded = false"') }}
+						<div>
+							<h2 class="m-0 text-sm font-bold text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("Rooms") }}</h2>
+							<p class="m-0 text-xs text-on-surface dark:text-on-surface-dark">{{ _("everything here vanishes") }}</p>
+						</div>
+					</div>
+					{{ button(label=_("New"), classes="px-2.5 py-1.5 text-xs", attrs='@click="show_new_room = true"') }}
+				</div>
+				<ul class="m-0 flex-1 list-none space-y-1 overflow-y-auto px-2 pb-4 pl-0">
+					<template x-for="room in rooms" :key="room.room_name">
+						<li>{{ room_row() }}</li>
+					</template>
+				</ul>
+			</aside>
+
+			{# Colours are a set-once preference, so they sit behind a disclosure rather than
+			   permanently occupying the bottom of the rail. #}
+			<div class="shrink-0 border-t border-outline dark:border-outline-dark" x-show="rail_expanded" x-cloak>
+				<button
+					type="button"
+					class="flex w-full items-center gap-1.5 px-3 py-2.5 text-[10px] font-semibold tracking-wider text-on-surface/70 uppercase transition hover:text-on-surface-strong dark:text-on-surface-dark/70 dark:hover:text-on-surface-dark-strong"
+					:aria-expanded="show_appearance"
+					@click="toggle_appearance()"
+				>
+					<span
+						class="transition-transform"
+						:class="show_appearance ? 'rotate-90' : ''"
+					>{{ icon("chevron-right", "size-3") }}</span>
+					{{ _("Colours") }}
+				</button>
+				<div class="px-3 pb-1" x-show="show_appearance" x-cloak>
+					{{ swatch_grid(_("My bubble"), "bubble_color", "set_bubble_color") }}
+					{{ swatch_grid(_("Accent"), "accent", "set_accent") }}
+				</div>
+			</div>
+		</div>
+
+		{# ============================= CONVERSATION ============================= #}
+		<main class="relative flex min-w-0 flex-1 flex-col bg-surface-alt dark:bg-surface-dark">
+
+			{# Pointer-events off so the overlay never eats the drop it is advertising. #}
+			<div
+				class="pointer-events-none absolute inset-3 z-40 flex flex-col items-center justify-center rounded-radius border-2 border-dashed border-primary bg-primary/10"
+				x-show="is_dragging"
+				x-cloak
+			>
+				<p class="m-0 text-sm font-bold text-primary">{{ _("Drop files to share them") }}</p>
+				<p class="m-0 mt-1 text-xs text-primary">{{ room.allowed_file_types | join(" · ") | e }}</p>
+			</div>
+
+			<header class="flex items-center gap-2 border-b border-outline bg-surface px-3 py-3 md:gap-4 md:px-5 dark:border-outline-dark dark:bg-surface-dark-alt">
+				{{ avatar("current_room_avatar_url", "size-10 rounded-radius", "display_name") }}
+				<div class="min-w-0 flex-1">
+					{# m-0 is required: preflight is deliberately not imported, so Bootstrap's own h1
+					   margins survive and would push the name off the row. #}
+					<h1 class="m-0 truncate text-sm font-bold text-on-surface-strong dark:text-on-surface-dark-strong" x-text="display_name">{{ (room.display_name or room.room_name) | e }}</h1>
+					<p class="m-0 truncate text-xs text-on-surface dark:text-on-surface-dark">
+						<span x-text="members.length"></span> {{ _("here") }} ·
+						<span x-text="messages.length"></span> {{ _("messages") }}
+					</p>
+				</div>
+				<div class="ml-auto flex items-center gap-2">
+					{# `md:flex` is not decoration: Frappe's bundle ships `.hidden { display: none !important }`,
+					   which beats a plain `md:flex` at every width. #}
+					<div class="hidden -space-x-2 md:flex">
+						<template x-for="person in members.slice(0, 4)" :key="person.sender">
+							{{ avatar("sender_avatar_url(person)", "size-7 rounded-full ring-2 ring-surface dark:ring-surface-dark-alt", "person.sender_name", attrs=':title="person.sender_name"') }}
+						</template>
+					</div>
+
+					{# The reference showed a plain expiry chip; the room's delete-after control has
+					   to live somewhere, and hanging it off the chip keeps the resting header
+					   identical. #}
+					<div class="relative shrink-0" @click.outside="show_validity = false">
+						<button
+							type="button"
+							class="rounded-radius bg-danger/10 px-2 py-1 font-mono text-xs font-semibold text-danger transition hover:opacity-80"
+							:aria-expanded="show_validity"
+							title="{{ _('Delete after') }}"
+							@click="show_validity = !show_validity"
+						><span x-text="time_left"></span></button>
+						<div
+							class="absolute right-0 top-full z-40 mt-2 w-44 rounded-radius border border-outline bg-surface p-3 shadow-lg dark:border-outline-dark dark:bg-surface-dark-alt"
+							x-show="show_validity"
+							x-cloak
+						>
+							<label class="block pb-1.5 text-[10px] font-semibold tracking-wider text-on-surface/70 uppercase dark:text-on-surface-dark/70" for="validity_select">{{ _("Delete after") }}</label>
+							{%- call select(attrs='id="validity_select" x-model.number="validity_hours" @change="save_validity()"') -%}
+							{% for option in validity_options %}
+							<option value="{{ option.hours }}">{{ option.label }}</option>
+							{% endfor %}
+							{%- endcall -%}
+						</div>
+					</div>
+
+					{{ button(
+						variant="outline",
+						classes="px-2.5 py-1.5 text-xs",
+						icon_html=icon("link", "size-3.5") ~ '<span class="hidden sm:inline">' ~ _("Share link") ~ '</span>',
+						attrs='@click="share_link()"'
+					) }}
+
+					<span class="mx-1 hidden h-6 w-px bg-outline md:block dark:bg-outline-dark"></span>
+
+					{# All three icons are in the DOM and shown by state, rather than an x-html
+					   string in the component: SVG belongs in the icon macro, and x-html on this
+					   page is reserved for server-sanitised Rich content. #}
+					<button
+						type="button"
+						class="rounded-radius p-2 text-on-surface transition hover:bg-surface-alt hover:text-on-surface-strong dark:text-on-surface-dark dark:hover:bg-surface-dark dark:hover:text-on-surface-dark-strong"
+						:title="theme_title"
+						@click="cycle_theme()"
+					>
+						<span x-show="theme === 'light'">{{ icon("light", "size-4") }}</span>
+						<span x-show="theme === 'dark'" x-cloak>{{ icon("dark", "size-4") }}</span>
+						<span x-show="theme === 'system'" x-cloak>{{ icon("system", "size-4") }}</span>
+						<span class="sr-only">{{ _("Change theme") }}</span>
+					</button>
+				</div>
+			</header>
+
+			{% if room.is_weak_name %}
+			<p class="m-0 border-b border-outline bg-danger/10 px-3 py-2 text-xs text-danger md:px-5 dark:border-outline-dark">
+				{{ _("This name is short or common, so a stranger could land in this room by accident. Do not paste anything sensitive here.") }}
+			</p>
+			{% endif %}
+
+			{# `relative` is load-bearing, not decoration: Frappe's bundled .sr-only is
+			   position:absolute, so with no positioned ancestor every per-message screen-reader
+			   label escapes this scroll container, is laid out against the document, and stretches
+			   it -- the page then scrolls behind a shell that is supposed to be fixed height. #}
+			<div class="relative flex-1 space-y-4 overflow-y-auto px-3 py-6 md:px-5" x-ref="item_pane" :style="wallpaper_style">
+
+				{# Server paint: readable before Alpine boots, then removed the moment it does.
+				   Reversed, because the API returns newest first and this reads oldest first like
+				   a chat. One bubble per item -- the live view regroups a multi-file send into
+				   one, which is not worth reimplementing in Jinja for a frame. #}
+				<ul class="m-0 list-none space-y-4 pl-0" x-init="$el.remove()">
+					{% for item in room["items"] | reverse %}
+					<li class="flex items-end gap-2">
+						<span class="size-8 shrink-0 rounded-full bg-surface dark:bg-surface-dark-alt"></span>
+						<div class="min-w-0 max-w-xl">
+							<p class="m-0 mb-1 px-1 text-xs font-semibold text-on-surface-strong dark:text-on-surface-dark-strong">{{ item.sender_name | e }}</p>
+							<div class="rounded-radius bg-surface px-3 py-2 text-sm text-on-surface-strong dark:bg-surface-dark-alt dark:text-on-surface-dark-strong">
+								{# | safe ONLY on Rich, which api.add_text sanitises to an allow-list before
+								   storing. Plain and Code are escaped -- add_text is xss_safe, so nothing
+								   bleached them on the way in. #}
+								{% if item.content and item.text_format == "Rich" %}
+								<div class="cb-rich break-words">{{ item.content | safe }}</div>
+								{% elif item.content and item.text_format == "Code" %}
+								<pre class="m-0 overflow-x-auto p-0 font-mono text-xs whitespace-pre text-inherit">{{ item.content | e }}</pre>
+								{% elif item.content %}
+								<p class="m-0 break-words whitespace-pre-wrap">{{ item.content | e }}</p>
+								{% endif %}
+								{% if item.item_type == "Image" %}
+								<img src="{{ item.file_url | e }}" alt="{{ item.file_name | e }}" loading="lazy" class="mt-2 max-h-64 rounded-radius">
+								{% elif item.item_type == "File" %}
+								<a class="mt-2 flex items-center gap-2 rounded-radius border border-current/25 px-3 py-2 text-sm text-inherit no-underline" href="{{ item.file_url | e }}" download>
+									{{ icon("download", "size-3.5 shrink-0") }}<span class="truncate">{{ item.file_name | e }}</span>
+								</a>
+								{% endif %}
+							</div>
+						</div>
+					</li>
+					{% endfor %}
+				</ul>
+
+				<div class="rounded-radius border border-dashed border-outline p-6 text-center dark:border-outline-dark" x-show="!messages.length" x-cloak>
+					<p class="m-0 text-sm font-bold text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("Nothing here yet.") }}</p>
+					<p class="m-0 mt-1 text-xs text-on-surface dark:text-on-surface-dark">
+						{{ _("Paste with Ctrl+V, drop a file anywhere, or type below. Ctrl+C copies the newest item back out.") }}
+					</p>
+				</div>
+
+				<template x-for="message in messages" :key="message.key">
+					<div>{{ chat_bubble(icon) }}</div>
+				</template>
+			</div>
+
+			<div class="border-t border-outline bg-surface px-3 py-3 md:px-5 dark:border-outline-dark dark:bg-surface-dark-alt">
+				<ul class="m-0 flex list-none flex-wrap gap-2 pb-2 pl-0" x-show="attachments.length" x-cloak>
+					<template x-for="file in attachments" :key="file.id">
+						<li class="relative">
+							<template x-if="file.preview_url">
+								<img :src="file.preview_url" :alt="file.name" class="size-16 rounded-radius border border-outline object-cover dark:border-outline-dark">
+							</template>
+							<template x-if="!file.preview_url">
+								<span class="flex size-16 flex-col items-center justify-center gap-1 rounded-radius border border-outline p-1 text-on-surface dark:border-outline-dark dark:text-on-surface-dark">
+									{{ icon("paperclip", "size-4") }}
+									<span class="w-full truncate text-center text-[10px]" x-text="file.name"></span>
+								</span>
+							</template>
+							<button
+								type="button"
+								class="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-danger text-xs font-bold text-white"
+								@click="remove_attachment(file.id)"
+							>&times;<span class="sr-only">{{ _("Remove attachment") }}</span></button>
+						</li>
+					</template>
+				</ul>
+
+				<div class="flex flex-wrap items-center gap-1 pb-2" x-show="rich_mode" x-cloak>
+					{{ rich_tool("bold", _("Bold"), "<b>B</b>") }}
+					{{ rich_tool("italic", _("Italic"), "<i>I</i>") }}
+					{{ rich_tool("underline", _("Underline"), "<u>U</u>") }}
+					{{ rich_tool("insertUnorderedList", _("Bullet list"), "&bull; " ~ _("List")) }}
+					{{ rich_tool("createLink", _("Link"), _("Link")) }}
+					{{ rich_tool("removeFormat", _("Clear formatting"), _("Clear")) }}
+					<span class="ml-auto font-mono text-[10px] text-primary" x-text="labels.rich_text_on"></span>
+				</div>
+
+				<form class="flex items-center gap-2" @submit.prevent="send()">
+					{{ avatar("my_avatar_url", "hidden size-8 rounded-full sm:block", "me") }}
+
+					<label class="sr-only" for="draft_input">{{ _("Message") }}</label>
+					<textarea
+						id="draft_input"
+						rows="1"
+						class="max-h-48 min-h-10 w-full resize-none overflow-y-auto rounded-radius border border-outline bg-surface-alt px-3 py-2 text-sm leading-6 text-on-surface-strong placeholder:text-on-surface/60 focus:border-primary focus:outline-none dark:border-outline-dark dark:bg-surface-dark dark:text-on-surface-dark-strong"
+						x-show="!rich_mode"
+						x-ref="plain_draft"
+						x-model="draft"
+						x-effect="draft; rich_mode; $nextTick(() => resize_draft($el))"
+						:placeholder="draft_placeholder"
+						@input="resize_draft($el)"
+						@paste="add_from_paste($event)"
+						@keydown.enter="if (!$event.shiftKey || $event.ctrlKey || $event.metaKey) { $event.preventDefault(); send(); }"
+					></textarea>
+
+					{# contenteditable, so no x-model: the component reads innerHTML on input and
+					   sanitises it again before it is sent. #}
+					<div
+						class="cb-rich max-h-48 min-h-10 w-full overflow-y-auto rounded-radius border border-outline bg-surface-alt px-3 py-2 text-sm leading-6 text-on-surface-strong focus:border-primary focus:outline-none dark:border-outline-dark dark:bg-surface-dark dark:text-on-surface-dark-strong"
+						contenteditable="true"
+						role="textbox"
+						aria-multiline="true"
+						aria-label="{{ _('Message') }}"
+						x-show="rich_mode"
+						x-cloak
+						x-ref="rich_draft"
+						@input="rich_html = $event.target.innerHTML"
+						@paste="add_from_paste($event)"
+					></div>
+
+					<label class="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-radius p-2 text-on-surface transition hover:bg-surface-alt dark:text-on-surface-dark dark:hover:bg-surface-dark" title="{{ _('Attach a file') }}">
+						{{ icon("paperclip", "size-5") }}
+						<span class="sr-only">{{ _("Attach a file") }}</span>
+						<input type="file" accept="{{ accept_attribute | e }}" multiple class="hidden" @change="add_picked_files($event)">
+					</label>
+
+					{{ button(
+						label=_("Send"),
+						type="submit",
+						attrs=':disabled="is_busy || (!draft_length && !attachments.length)"'
+					) }}
+				</form>
+			</div>
+		</main>
+	</div>
+
+	{# ============================= LIGHTBOX ============================= #}
+	<div class="fixed inset-0 z-60 flex flex-col items-center justify-center gap-3 bg-black/80 p-6" x-show="lightbox" x-cloak @click.self="lightbox = null">
+		<img :src="lightbox?.file_url" :alt="lightbox?.file_name" class="max-h-[75vh] max-w-full rounded-radius">
+		<div class="flex items-center gap-2">
+			<span class="font-mono text-xs text-white/70" x-text="lightbox?.file_name"></span>
+			{{ button(label=_("Copy image"), classes="px-3 py-1.5 text-xs", attrs='@click="copy_file(lightbox)"') }}
+			<button type="button" class="rounded-radius border border-white/30 px-3 py-1.5 text-xs font-semibold text-white" @click="lightbox = null">{{ _("Close") }}</button>
+		</div>
+	</div>
+
+	{# ============================= JOIN ============================= #}
+	{%- call modal("show_join") -%}
+	{{ avatar("draft_avatar_url", "mx-auto size-20 rounded-radius") }}
+	<h2 class="m-0 mt-4 text-center text-lg font-bold text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("What should we call you?") }}</h2>
+	<p class="m-0 mt-1 text-center text-xs text-on-surface dark:text-on-surface-dark">
+		{{ _("No account, no password. The name lives in this browser and dies with the room.") }}
+	</p>
+	<form class="mt-5 flex flex-col gap-3" @submit.prevent="join()">
+		<label class="sr-only" for="name_input">{{ _("Your name") }}</label>
+		{{ text_input(placeholder=_("e.g. Hussain"), attrs='id="name_input" x-model="name_draft"') }}
+		{{ button(label=_("Join the room"), type="submit", classes="w-full", attrs=':disabled="!name_draft.trim()"') }}
+	</form>
+	{%- endcall -%}
+
+	{# ============================= NEW ROOM ============================= #}
+	{%- call modal("show_new_room", attrs='@click.self="show_new_room = false"') -%}
+	{{ avatar("new_room_avatar_url", "mx-auto size-16 rounded-radius") }}
+	<h2 class="m-0 mt-4 text-center text-lg font-bold text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("Name the room") }}</h2>
+	<p class="m-0 mt-1 text-center text-xs text-on-surface dark:text-on-surface-dark">
+		{{ _("It gets a shareable URL and deletes itself when it expires. Anyone who knows the name is in the room, so pick one nobody would type by accident.") }}
+	</p>
+	<form class="mt-5 flex flex-col gap-3" @submit.prevent="create_room()">
+		<label class="sr-only" for="room_input">{{ _("Room name") }}</label>
+		{{ text_input(placeholder=_("e.g. Friday deploy notes"), attrs='id="room_input" x-model="room_draft"') }}
+		<p class="m-0 font-mono text-[10px] text-on-surface/70 dark:text-on-surface-dark/70" x-text="`/clipboard/${slug(room_draft) || '…'}`"></p>
+		<div class="flex gap-2">
+			{{ button(label=_("Cancel"), variant="outline", classes="flex-1", attrs='@click="show_new_room = false"') }}
+			{{ button(label=_("Create"), type="submit", classes="flex-1", attrs=':disabled="!is_valid_room_draft"') }}
+		</div>
+	</form>
+	{%- endcall -%}
+
+	<div
+		class="fixed bottom-6 left-1/2 z-70 -translate-x-1/2 rounded-radius bg-on-surface-strong px-4 py-2 text-sm font-semibold text-surface shadow-lg dark:bg-on-surface-dark-strong dark:text-surface-dark"
+		x-show="toast"
+		x-cloak
+		x-transition
+		x-text="toast"
+	></div>
+</div>

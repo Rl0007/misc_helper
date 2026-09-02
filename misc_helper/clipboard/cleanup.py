@@ -17,7 +17,7 @@ def delete_expired_rooms() -> None:
 		delete_room(room_name)
 		# A worker's work is invisible until it commits, and one bad room must not
 		# roll back every room cleaned before it.
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job, see comment above
 
 
 def delete_room(room_name: str) -> None:

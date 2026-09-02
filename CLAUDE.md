@@ -175,6 +175,35 @@ Single row already exists and `migrate` leaves it **NULL** — the JSON says `"d
 the site reads `None`. Seed it with a patch, and have the code fall back to a module constant so a
 blank never silently means zero.
 
+## The clipboard pages do not load Frappe's website bundle at all
+
+**Read this before debugging any CSS problem on `/clipboard`.** Those pages render inside
+`templates/clipboard_shell.html`, a standalone `<html>` document that does NOT extend
+`templates/base.html`. They ship one stylesheet (`clipboard.css`, Tailwind **with preflight**) and
+four scripts, and `window.frappe` is `undefined` on them.
+
+Why: `website.bundle.css` is 692 KB of Bootstrap, and everything it was providing here was three
+values — a CSRF token, the socketio port, and a socket.io client. All three now come from
+`misc_helper/clipboard/shell.py` (`window.clipboard_boot`) and a vendored socket.io, with realtime
+hand-wired in `clipboard_realtime.js`. This is the same shape frappe-ui apps (CRM, Helpdesk,
+Gameplan, Drive) use.
+
+**Every collision documented in the next four sections therefore does NOT apply to those pages** —
+no `!` modifiers, no `bg-transparent` on buttons, no `m-0`/`list-none`/`text-inherit` on bare
+elements, no `.text-sm` weight leak. Write plain utilities. Those sections still govern every
+OTHER portal page in this app, which does extend `base.html`.
+
+If a colour or a margin ever mysteriously stops applying on a clipboard page again, the first
+thing to check is whether something put that bundle back on the page.
+
+Two things this cost, both worth knowing:
+- `body_class` still comes from each page's `get_context`, because the two pages need different
+  ones (the room is a fixed-height `h-screen overflow-hidden` flex shell; the landing page is an
+  ordinary scrolling document) and because the reference's base-layer body colours live there.
+  Without them the document behind the app is the browser's white in both themes.
+- Assets are versioned from one constant, `shell.ASSET_VERSION`. **Bump it on any change** to
+  `clipboard.css`, `clipboard_room.js` or `clipboard_realtime.js`.
+
 ## Bootstrap owns `.bg-primary` and friends, with `!important`
 
 Frappe's `website.bundle.css` ships Bootstrap's contextual utilities — `.bg-primary`,
@@ -188,6 +217,29 @@ Only the BARE names collide: `bg-danger/40` generates a different class and is s
 modifier (`bg-primary!`) wins on source order. Grep the built bundle before assuming a name is
 free:
 `python3 -c "import re;print(re.search(r'\.bg-primary\s*\{[^}]*\}', open(PATH).read()))"`
+
+## `.hidden` is `!important` in Frappe's bundle, so `hidden md:flex` never turns on
+
+`website.bundle.css` ships `.d-none, .hide-control, .hide, .hidden { display: none !important }`.
+Tailwind emits its own `.hidden{display:none}` with no `!important`, so the two look
+interchangeable — but the Bootstrap one wins, and `!important` beats a media-query utility
+**regardless of specificity or source order**. Every `hidden md:flex` / `hidden sm:inline` on a
+portal page is therefore permanently invisible at every width.
+
+This is the inverse of the `.bg-primary` collision above and hides in exactly the same way: the
+class list reads correctly, no error is raised, and the element is simply never there. It cost a
+sidebar and the room header's "Delete after" label before it was found.
+
+Fix with Tailwind's important modifier on the SHOWING half — `hidden md:flex!`, `hidden sm:inline!`
+— never by dropping `hidden` (the element would then show at every width). `md:hidden` is
+unaffected, because it wants `display:none` anyway, which is why half the responsive classes on a
+page keep working and mask the other half.
+
+Verify in the browser, not in the class list:
+`getComputedStyle(el).display` at a wide viewport. And when walking the CSSOM to find the winning
+rule, do NOT skip nodes that have a `cssRules` property — Chrome now gives every `CSSStyleRule` an
+empty one, so `if (r.cssRules) recurse; else check` silently skips every style rule and reports
+that the colliding rule does not exist.
 
 ## The Tailwind-built stylesheet has no cache-busting
 
@@ -215,6 +267,59 @@ a coloured bubble keeps Bootstrap's near-black and vanishes unless you add `text
 resets, and this looks fine in isolation — it breaks only on a page that also loads the bundle,
 which is every page in production.
 
+The same omission also leaves `img` at the UA's `display: inline`. Preflight would make it `block`,
+so **`mx-auto` on an image centres nothing** (an inline box ignores auto side margins) and every
+image sits on the text baseline with a descender gap beneath it. Port a scoped
+`:where(.cb-page) :is(img, svg, video, canvas) { display: block }` rather than hunting the symptom —
+it cost a left-aligned avatar in the join modal that read as "the padding is broken".
+
+## Frappe ships its OWN `.text-xs` / `.text-sm` / `.text-base` / `.text-lg`, and they are not Tailwind's
+
+This is the worst collision found so far, because it is a **partial** override:
+
+```
+frappe   .text-sm { font-size; line-height: 1.15; font-weight: 420; letter-spacing: 0.02em }
+tailwind .text-sm { font-size; line-height }
+```
+
+Same name, same `(0,1,0)` specificity, both unlayered — so your build wins on source order for the
+two properties it declares, and **`font-weight` and `letter-spacing` leak through from Frappe on
+every element carrying one of those four classes**. Size and leading come out right, which is
+exactly why nobody looks further: only the weight (420, not 400) and the tracking (0.02em, not
+`normal`) are quietly wrong.
+
+An *arbitrary* value like `text-[10px]` is unaffected, since Frappe defines no such class. So one
+page renders some text at 400 and some at 420 with nothing in the markup to explain it.
+
+Neutralise it before the utilities are emitted, so it still loses to `font-bold` / `tracking-*`:
+`:where(.cb-page) :is(.text-xs, .text-sm, .text-base, .text-lg) { font-weight: inherit; letter-spacing: inherit }`
+
+Related, same bundle, same class of bug: `body { font-size: var(--text-lg); font-weight: 420;
+letter-spacing: 0.02em }` and `p { line-height: 1.7 }` set the page's INHERITED typography at element
+specificity. Re-declare the baseline on your page wrapper class (which beats bare `body`), and reset
+`p`/`h1`–`h6` with `font: inherit` — an inherited value always loses to a direct rule, so the wrapper
+alone cannot reach them.
+
+**Verify typography by measuring, never by looking.** Render the reference in the same browser and
+diff `getComputedStyle` for font-size/weight/line-height/letter-spacing on matching elements; a 400
+vs 420 weight and 0.02em of tracking are invisible side by side but change every wrap point.
+
+## `space-y-*` silently does nothing when the children are form controls
+
+Tailwind v4 emits space utilities wrapped in `:where(...)`, i.e. specificity `(0,0,0)`. Frappe's
+bundle ships Bootstrap's reboot, which includes:
+
+```css
+input, button, select, optgroup, textarea { margin: 0; }
+```
+
+That is `(0,0,1)` and beats `(0,0,0)` **regardless of source order**, so `space-y-3` on a form whose
+children are an `<input>` and a `<button>` produces exactly 0px and the controls touch. Nothing in
+the class list hints at it.
+
+Use `flex flex-col gap-3` instead — `gap` is not a margin, so the reboot cannot reach it. The same
+applies to `space-x-*` on a row of buttons.
+
 ## Committing from a read path
 
 Never call `frappe.db.commit()` in a GET handler — it commits the caller's entire ambient
@@ -225,7 +330,7 @@ request (`app.py:433`).
 
 - Frappe **already ships the frappe-ui/espresso token layer** on every website page
   (`frappe/public/css/espresso/colors.css` via `website.bundle.scss`) — ~1125 CSS variables
-  with a `[data-theme="dark"]` block. Never declare a color; map onto these and dark mode is free.
+  with a `[data-theme="dark"]` block. Mapping onto these gets dark mode for free.
 - The bundled `scss/common/utilities.scss` is only a ~55-class subset (no spacing or text
   sizes), so a real Tailwind build is still needed.
 - **Use `@theme inline`.** Plain `@theme` freezes the token's value at `:root`, breaking the
@@ -235,6 +340,36 @@ request (`app.py:433`).
   `.inline-flex` silently overrides your `md:hidden`.
 - **Do not import preflight** — it strips Frappe's navbar and footer. Without it, Bootstrap's
   list padding survives, so add `list-none pl-0` on `<ul>`s.
+
+## The linter: Biome owns JS, and semgrep needs a reason not a silence
+
+The Frappe app boilerplate ships **prettier + eslint** pre-commit hooks, but this app formats JS
+with **Biome** (`biome.json`, `yarn lint`). Three formatters over the same files can never all be
+satisfied — prettier and Biome disagree on tabs and quote style, so `clipboard_room.js` churned
+~370 lines on every run — and neither boilerplate hook excluded the vendored `alpine.min.js` /
+`socket.io.min.js`, so each run rewrote 6000 lines of minified library and eslint then reported
+`no-func-assign` against them. Both hooks are gone; the `biomejs/pre-commit` hook is the only JS
+tool, pinned to the same version as `package.json`. `.eslintrc` was deleted with them — it was desk
+boilerplate (globals for `cur_frm`, jQuery, Cypress) that this Tailwind/Alpine app never used.
+
+**Keep the pre-commit rev, `package.json`'s `@biomejs/biome`, and `biome.json`'s `$schema` on one
+version.** The hook installs its own copy, so a drifting pin means CI and your machine format
+differently and the diff flip-flops per committer.
+
+The linter job also runs **semgrep**, which is not optional-advisory in CI — any finding exits
+non-zero. Two rules fire here by design and both are silenced per-line with a stated reason, which
+is what the rules themselves ask for:
+
+- `guest-whitelisted-method` on all 8 `allow_guest=True` endpoints — a clipboard reached by saying
+  a room name out loud is the product; there is no user to check permissions against. The rationale
+  lives once in the GUEST ACCESS block at the top of `api.py` and each decorator points back to it.
+- `frappe-manual-commit` — the scheduled cleanup job and the test base's settings/teardown, all of
+  which must outlive the per-class rollback.
+
+**Put `# nosemgrep` on the line ABOVE the decorator, never trailing it.** Trailing it pushes the
+line past ruff's 110 columns, ruff-format then splits the decorator across lines, and the comment
+lands on the closing `)` — no longer the line the finding is on, so the silence silently stops
+working and the linter goes red again with the comment still sitting there.
 
 ## Testing
 

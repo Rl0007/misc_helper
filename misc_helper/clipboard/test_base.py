@@ -36,7 +36,7 @@ class ClipboardTestBase(IntegrationTestCase):
 		for room_name in self.rooms_to_clean:
 			if frappe.db.exists("Clipboard", room_name):
 				delete_room(room_name)
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- cleanup must outlive the rollback
 		super().tearDown()
 
 	def make_room_name(self, prefix: str = "room") -> str:
@@ -108,11 +108,11 @@ class ClipboardTestBase(IntegrationTestCase):
 		previous_values = {key: settings.get(key) for key in values}
 		try:
 			settings.update(values).save(ignore_permissions=True)
-			frappe.db.commit()
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- settings must outlive the rollback
 			yield
 		finally:
 			frappe.get_doc("Clipboard Settings").update(previous_values).save(ignore_permissions=True)
-			frappe.db.commit()
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- restore must outlive the rollback
 
 	@contextmanager
 	def collect_queries(self, queries: list):

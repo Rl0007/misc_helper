@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "room_name",
+  "display_name",
   "validity_hours",
   "expires_on",
   "last_activity"
@@ -38,6 +39,13 @@
    "fieldtype": "Int",
    "label": "Validity Hours",
    "non_negative": 1
+  },
+  {
+   "description": "Human title for the room, shared by everyone in it. Cosmetic only -- room_name stays the address and the credential.",
+   "fieldname": "display_name",
+   "fieldtype": "Data",
+   "label": "Display Name",
+   "length": 60
   }
  ],
  "grid_page_length": 50,

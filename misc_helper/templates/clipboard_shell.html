@@ -1,0 +1,73 @@
+{#
+	Standalone document shell for the clipboard pages.
+
+	This deliberately does NOT extend templates/base.html, which is the whole point of it. base.html
+	pulls in website.bundle.css -- 692 KB of Bootstrap whose rules actively fight this design:
+
+	  - .bg-primary / .text-primary / .border-primary / .bg-danger are hardcoded #171717 !important
+	  - .hidden is display:none !important, so `hidden md:flex` never turns on
+	  - .text-xs / .text-sm / .text-base / .text-lg are Frappe's OWN classes and only partially
+	    overlap Tailwind's, leaking font-weight 420 and letter-spacing 0.02em onto every element
+	    carrying one
+	  - Bootstrap's reboot restyles every bare element, and beats Tailwind's :where()-wrapped
+	    space-y-* utilities outright
+
+	Off that bundle, all of those disappear and the page renders in exactly the environment its
+	design reference was drawn in. What we actually used from base.html was three things -- a CSRF
+	token, the socketio port, and a socket.io client -- and all three are provided below. This is
+	the same shape every frappe-ui app (CRM, Helpdesk, Gameplan, Drive) uses: own the document,
+	ship your own CSS, talk to the API over plain HTTP.
+
+	NEVER add website.bundle.css back here "for one utility class". The collisions above are
+	invisible in the class list and cost days to rediscover.
+#}
+<!doctype html>
+<html lang="{{ frappe.local.lang or 'en' }}" dir="ltr">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	{# The room name is the only credential (spec §5), so a room URL must never reach a search index. #}
+	<meta name="robots" content="noindex, nofollow">
+	<title>{% block title %}{{ title | e }}{% endblock %}</title>
+
+	{# Settled before first paint, not from the deferred Alpine component: a class toggled after
+	   paint is a full-page white flash for every dark-mode reader. #}
+	<script>
+		try {
+			const stored_theme = JSON.parse(window.localStorage.getItem('clipboard_theme') || '"system"');
+			const prefers_dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			document.documentElement.classList.toggle(
+				'dark',
+				stored_theme === 'dark' || (stored_theme === 'system' && prefers_dark),
+			);
+		} catch (error) {
+			// localStorage throws in a private window or with site data blocked; light is the default.
+		}
+	</script>
+
+	{# Everything frappe-web.bundle.js was carried in for. csrf_token is empty for a Guest (whose
+	   session has none, so frappe/auth.py:83 validate_csrf_token returns early) and populated for a
+	   logged-in visitor, whose POSTs would otherwise be rejected. #}
+	<script>
+		window.clipboard_boot = {{ boot | json }};
+	</script>
+
+	<link rel="stylesheet" href="/assets/misc_helper/css/clipboard.css?v={{ asset_version }}">
+
+	{% block head_include %}{% endblock %}
+</head>
+{# Each page supplies its own body classes through context.body_class, the way base.html did --
+   they differ: the room is a fixed-height flex shell that must not scroll, the landing page is an
+   ordinary scrolling document. Both include the reference's own base-layer body colours, without
+   which the document behind the app is the browser's white in both themes. #}
+<body class="{{ body_class }}">
+	{% block page_content %}{% endblock %}
+
+	{# Each page declares only the scripts it needs -- the landing page has its own small component
+	   and neither opens a socket nor loads the room. Inline <script> in this block still runs before
+	   the deferred Alpine below it, which is what alpine:init registration requires. #}
+	{% block page_scripts %}{% endblock %}
+
+	<script defer src="/assets/misc_helper/js/alpine.min.js"></script>
+</body>
+</html>

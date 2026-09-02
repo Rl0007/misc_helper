@@ -1,6 +1,7 @@
 # Copyright (c) 2026, rl0007 and Contributors
 # See license.txt
 
+import json
 import os
 from unittest.mock import patch
 
@@ -11,14 +12,20 @@ from frappe.utils.data import add_to_date, cint, get_datetime, now_datetime
 from misc_helper.clipboard.api import (
 	DEFAULT_TRANSPORT_BYTES,
 	JSON_ENVELOPE_BYTES,
+	MAX_DISPLAY_NAME_LENGTH,
+	MAX_PREVIEW_LENGTH,
+	MAX_ROOMS_PER_LOOKUP,
+	MAX_SENDER_NAME_LENGTH,
 	add_file,
 	add_text,
 	delete_item,
 	get_max_file_bytes,
 	get_room,
 	get_room_validity_hours,
+	get_rooms,
 	get_settings,
 	set_pinned,
+	set_room_display_name,
 	set_validity,
 )
 from misc_helper.clipboard.test_base import ClipboardTestBase
@@ -661,28 +668,39 @@ class TestWhitelisting(ClipboardTestBase):
 	GET is caught."""
 
 	def test_endpoints_are_reachable_by_a_guest(self):
-		for method in (get_room, add_text, add_file, delete_item, set_validity, set_pinned):
+		for method in (
+			get_room,
+			get_rooms,
+			add_text,
+			add_file,
+			delete_item,
+			set_validity,
+			set_pinned,
+			set_room_display_name,
+		):
 			with self.subTest(method=method.__name__), self.set_user("Guest"):
 				frappe.is_whitelisted(method)
 
 	def test_writes_are_post_only_and_reads_are_not(self):
-		for method in (add_text, add_file, delete_item, set_validity, set_pinned):
+		for method in (add_text, add_file, delete_item, set_validity, set_pinned, set_room_display_name):
 			with self.subTest(method=method.__name__):
 				self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[method], ("POST",))
 
-		self.assertIn("GET", frappe.allowed_http_methods_for_whitelisted_func[get_room])
+		for method in (get_room, get_rooms):
+			with self.subTest(method=method.__name__):
+				self.assertIn("GET", frappe.allowed_http_methods_for_whitelisted_func[method])
 
 	def test_only_the_free_text_endpoints_are_xss_safe(self):
 		"""For a Guest caller is_whitelisted bleaches every string in form_dict before the body
 		runs. The two endpoints that store what was typed must opt out; nothing else may, because
 		xss_safe makes render-time escaping the only remaining defence."""
-		for method in (add_text, add_file):
+		for method in (add_text, add_file, set_room_display_name):
 			with self.subTest(method=method.__name__):
 				self.assertIn(method, frappe.xss_safe_methods)
 
 		# Deliberate: none of these takes free text -- room_name is re-derived through a strict
 		# filter, item_name is a hash id, the rest are numbers.
-		for method in (get_room, delete_item, set_validity, set_pinned):
+		for method in (get_room, get_rooms, delete_item, set_validity, set_pinned):
 			with self.subTest(method=method.__name__):
 				self.assertNotIn(method, frappe.xss_safe_methods)
 
@@ -715,3 +733,361 @@ class TestGetRoomQueryCount(ClipboardTestBase):
 			msg="get_room scales with item count:\n" + "\n\n".join(large_room_queries),
 		)
 		self.assertLessEqual(len(large_room_queries), 4, msg="\n\n".join(large_room_queries))
+
+
+class TestRichText(ClipboardTestBase):
+	"""add_text is allow_guest + xss_safe and `content` carries ignore_xss_filter, so this
+	allowlist is the only thing between a pasted payload and stored XSS."""
+
+	def add_rich_text(self, room_name: str, content: str) -> str:
+		return add_text(room_name, content, text_format="Rich")["content"]
+
+	def test_script_tag_is_removed_with_its_text(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, "before<script>alert(1)</script>after")
+
+		self.assertNotIn("script", stored)
+		self.assertNotIn("alert", stored)
+		self.assertEqual(stored, "beforeafter")
+
+	def test_event_handler_attribute_does_not_survive(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, '<b onclick="alert(1)">bold</b>')
+
+		self.assertEqual(stored, "<b>bold</b>")
+
+	def test_image_with_an_onerror_handler_does_not_survive(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, "<img src=x onerror=alert(1)>text")
+
+		self.assertNotIn("onerror", stored)
+		self.assertNotIn("<img", stored)
+		self.assertEqual(stored, "text")
+
+	def test_allowlisted_formatting_survives(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, "<p><b>bold</b> and <code>code</code></p>")
+
+		self.assertEqual(stored, "<p><b>bold</b> and <code>code</code></p>")
+
+	def test_disallowed_tag_is_unwrapped_and_keeps_its_children(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, "<h1>title <b>kept</b></h1>")
+
+		self.assertEqual(stored, "title <b>kept</b>")
+
+	def test_javascript_href_is_dropped(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, '<a href="javascript:alert(1)">click</a>')
+
+		self.assertNotIn("javascript", stored)
+		self.assertNotIn("href", stored)
+		self.assertIn(">click</a>", stored)
+
+	def test_https_href_survives_with_rel_and_target(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, '<a href="https://example.com/x">click</a>')
+
+		self.assertIn('href="https://example.com/x"', stored)
+		self.assertIn('rel="noopener noreferrer"', stored)
+		self.assertIn('target="_blank"', stored)
+
+	def test_relative_href_is_dropped_because_it_is_still_same_origin(self):
+		room_name = self.make_room_name("rich")
+
+		stored = self.add_rich_text(room_name, '<a href="/app/user">click</a>')
+
+		self.assertNotIn("href", stored)
+
+	def test_plain_text_is_stored_verbatim_and_is_never_sanitised(self):
+		"""Only Rich content is HTML. A Plain item is code or prose and must survive intact."""
+		room_name = self.make_room_name("rich")
+		snippet = "if a < b:\n\tprint('<script>')"
+
+		stored = add_text(room_name, snippet)
+
+		self.assertEqual(stored["content"], snippet)
+		self.assertEqual(stored["text_format"], "Plain")
+
+	def test_content_that_sanitises_to_nothing_is_rejected(self):
+		room_name = self.make_room_name("rich")
+
+		self.assertRaises(
+			frappe.ValidationError, add_text, room_name, "<script>x</script>", None, None, "Rich"
+		)
+		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 0)
+
+	def test_size_cap_is_measured_on_the_raw_content_not_the_sanitised_leftovers(self):
+		"""A megabyte of markup must not pass by collapsing to a handful of surviving words."""
+		room_name = self.make_room_name("rich")
+		with self.temporary_settings(max_text_size_kb=1):
+			payload = "<script>" + ("x" * 2048) + "</script>ok"
+			self.assertRaises(frappe.ValidationError, add_text, room_name, payload, None, None, "Rich")
+
+
+class TestTextFormat(ClipboardTestBase):
+	def test_each_supported_format_round_trips(self):
+		room_name = self.make_room_name("format")
+
+		for text_format in ("Plain", "Code", "Rich"):
+			with self.subTest(text_format=text_format):
+				item = add_text(room_name, "hello", text_format=text_format)
+				self.assertEqual(item["text_format"], text_format)
+
+	def test_junk_format_falls_back_to_plain(self):
+		room_name = self.make_room_name("format")
+
+		for text_format in ("Markdown", "", None, "<script>", "rich; drop table"):
+			with self.subTest(text_format=text_format):
+				item = add_text(room_name, "hello", text_format=text_format)
+				self.assertEqual(item["text_format"], "Plain")
+
+	def test_junk_format_leaves_the_content_unsanitised(self):
+		"""The fallback must not quietly route content through the Rich sanitiser -- a Plain item
+		is code, and stripping its angle brackets would corrupt what was pasted."""
+		room_name = self.make_room_name("format")
+
+		item = add_text(room_name, "<b>a</b> & <c>", text_format="Markdown")
+
+		self.assertEqual(item["content"], "<b>a</b> & <c>")
+
+
+class TestSenderName(ClipboardTestBase):
+	def test_sender_name_round_trips_on_both_write_endpoints(self):
+		room_name = self.make_room_name("name")
+
+		text_item = add_text(room_name, "hello", sender_name="Aparna")
+		file_item = add_file(room_name, "a.png", self.encode(self.make_image_bytes()), sender_name="Aparna")
+
+		self.assertEqual(text_item["sender_name"], "Aparna")
+		self.assertEqual(file_item["sender_name"], "Aparna")
+
+	def test_sender_name_is_capped(self):
+		room_name = self.make_room_name("name")
+
+		item = add_text(room_name, "hello", sender_name="a" * 200)
+
+		self.assertEqual(len(item["sender_name"]), MAX_SENDER_NAME_LENGTH)
+		stored = frappe.db.get_value("Clipboard Item", item["name"], "sender_name")
+		self.assertEqual(len(stored), MAX_SENDER_NAME_LENGTH)
+
+	def test_control_characters_and_newlines_are_flattened(self):
+		room_name = self.make_room_name("name")
+
+		item = add_text(room_name, "hello", sender_name="Ap\narna\x00\tK  ")
+
+		self.assertEqual(item["sender_name"], "Ap arna K")
+
+	def test_missing_sender_name_is_empty_not_null(self):
+		room_name = self.make_room_name("name")
+
+		self.assertEqual(add_text(room_name, "hello")["sender_name"], "")
+
+
+class TestGroupId(ClipboardTestBase):
+	def test_files_sent_together_share_one_group_id(self):
+		room_name = self.make_room_name("group")
+		group_id = frappe.generate_hash(length=32)
+
+		items = [
+			add_file(room_name, f"{index}.png", self.encode(self.make_image_bytes()), group_id=group_id)
+			for index in range(2)
+		]
+
+		self.assertEqual([item["group_id"] for item in items], [group_id, group_id])
+
+	def test_a_malformed_group_id_is_dropped_rather_than_rejected(self):
+		room_name = self.make_room_name("group")
+
+		for group_id in ("", None, "short", "not-hex-at-all-not-hex", "<script>", "  "):
+			with self.subTest(group_id=group_id):
+				item = add_file(room_name, "a.png", self.encode(self.make_image_bytes()), group_id=group_id)
+				self.assertEqual(item["group_id"], "")
+
+
+class TestDisplayName(ClipboardTestBase):
+	def test_get_room_falls_back_to_the_room_name(self):
+		room_name = self.make_room_name("title")
+
+		self.assertEqual(get_room(room_name)["display_name"], room_name)
+
+	def test_display_name_is_stored_and_returned(self):
+		room_name = self.make_room_name("title")
+		get_room(room_name)
+
+		set_room_display_name(room_name, "Friday deploy notes")
+
+		self.assertEqual(get_room(room_name)["display_name"], "Friday deploy notes")
+
+	def test_display_name_is_capped_and_flattened(self):
+		room_name = self.make_room_name("title")
+
+		result = set_room_display_name(room_name, "Friday\ndeploy " + "x" * 200)
+
+		self.assertEqual(len(result["display_name"]), MAX_DISPLAY_NAME_LENGTH)
+		self.assertTrue(result["display_name"].startswith("Friday deploy "))
+
+	def test_renaming_does_not_slide_the_room_expiry(self):
+		"""Renaming is not new content. If it slid the expiry, an idle tab could keep a dead room
+		alive forever."""
+		room_name = self.make_room_name("title")
+		get_room(room_name)
+		expires_on = frappe.db.get_value("Clipboard", room_name, "expires_on")
+
+		set_room_display_name(room_name, "Friday deploy notes")
+
+		self.assertEqual(frappe.db.get_value("Clipboard", room_name, "expires_on"), expires_on)
+
+	def test_clearing_the_display_name_falls_back_to_the_room_name(self):
+		room_name = self.make_room_name("title")
+		set_room_display_name(room_name, "Friday deploy notes")
+
+		result = set_room_display_name(room_name, "   ")
+
+		self.assertEqual(result["display_name"], room_name)
+		self.assertEqual(frappe.db.get_value("Clipboard", room_name, "display_name"), "")
+
+	def test_one_room_cannot_retitle_another(self):
+		first_room = self.make_room_name("title")
+		second_room = self.make_room_name("title")
+		get_room(first_room)
+		get_room(second_room)
+
+		set_room_display_name(first_room, "mine")
+
+		self.assertEqual(frappe.db.get_value("Clipboard", second_room, "display_name"), None)
+
+
+class TestGetRooms(ClipboardTestBase):
+	def test_summaries_are_returned_for_known_rooms(self):
+		room_name = self.make_room_name("list")
+		set_room_display_name(room_name, "Friday deploy notes")
+		add_text(room_name, "first", sender_name="Aparna")
+		add_text(room_name, "the newest message", sender_name="Rahul")
+
+		summary = get_rooms([room_name])[0]
+
+		self.assertEqual(summary["room_name"], room_name)
+		self.assertEqual(summary["display_name"], "Friday deploy notes")
+		self.assertEqual(summary["item_count"], 2)
+		self.assertEqual(summary["last_sender_name"], "Rahul")
+		self.assertEqual(summary["last_preview"], "the newest message")
+		self.assertTrue(summary["expires_on"])
+
+	def test_a_json_encoded_list_is_accepted(self):
+		"""The client sends the sidebar as a JSON string over GET."""
+		room_name = self.make_room_name("list")
+		get_room(room_name)
+
+		self.assertEqual(len(get_rooms(json.dumps([room_name]))), 1)
+
+	def test_display_name_falls_back_to_the_room_name(self):
+		room_name = self.make_room_name("list")
+		get_room(room_name)
+
+		self.assertEqual(get_rooms([room_name])[0]["display_name"], room_name)
+
+	def test_empty_room_reports_a_zero_count_and_no_preview(self):
+		room_name = self.make_room_name("list")
+		get_room(room_name)
+
+		summary = get_rooms([room_name])[0]
+
+		self.assertEqual(summary["item_count"], 0)
+		self.assertEqual(summary["last_preview"], "")
+		self.assertEqual(summary["last_sender_name"], "")
+
+	def test_preview_of_a_file_item_is_its_file_name(self):
+		room_name = self.make_room_name("list")
+		add_file(room_name, "holiday.png", self.encode(self.make_image_bytes()))
+
+		self.assertEqual(get_rooms([room_name])[0]["last_preview"], "holiday.png")
+
+	def test_preview_of_rich_content_carries_no_markup(self):
+		room_name = self.make_room_name("list")
+		add_text(room_name, '<p><b>bold</b> <a href="https://e.com">link</a></p>', text_format="Rich")
+
+		self.assertEqual(get_rooms([room_name])[0]["last_preview"], "bold link")
+
+	def test_preview_collapses_whitespace_and_is_capped(self):
+		room_name = self.make_room_name("list")
+		add_text(room_name, "one\n\n   two " + "x" * 200)
+
+		preview = get_rooms([room_name])[0]["last_preview"]
+
+		self.assertEqual(len(preview), MAX_PREVIEW_LENGTH)
+		self.assertTrue(preview.startswith("one two xxx"))
+
+	def test_unknown_room_is_omitted_and_stays_uncreated(self):
+		room_name = self.make_room_name("list")
+
+		self.assertEqual(get_rooms([room_name]), [])
+		self.assertFalse(frappe.db.exists("Clipboard", room_name))
+
+	def test_expired_room_is_omitted_and_is_not_resurrected(self):
+		"""get_room deliberately resurrects; this one must not. A stale sidebar entry would
+		otherwise push a dead room's expiry forward on every page load."""
+		room_name = self.create_room(expires_on=add_to_date(now_datetime(), hours=-1), prefix="list")
+		self.create_text_item(room_name, "old")
+		expires_on = frappe.db.get_value("Clipboard", room_name, "expires_on")
+
+		self.assertEqual(get_rooms([room_name]), [])
+
+		self.assertTrue(frappe.db.exists("Clipboard", room_name))
+		self.assertEqual(frappe.db.get_value("Clipboard", room_name, "expires_on"), expires_on)
+		self.assertEqual(frappe.db.count("Clipboard Item", {"clipboard": room_name}), 1)
+
+	def test_a_malformed_name_is_skipped_rather_than_failing_the_call(self):
+		room_name = self.make_room_name("list")
+		get_room(room_name)
+
+		summaries = get_rooms(["NO", "", None, "../etc/passwd", room_name])
+
+		self.assertEqual([summary["room_name"] for summary in summaries], [room_name])
+
+	def test_the_list_length_is_capped(self):
+		room_name = self.make_room_name("list")
+		get_room(room_name)
+		# The real room sits past the cap, so it is only returned if the cap did not bite.
+		padding = [f"filler-{index:04d}" for index in range(MAX_ROOMS_PER_LOOKUP)]
+
+		self.assertEqual(get_rooms([*padding, room_name]), [])
+
+	def test_no_room_names_returns_an_empty_list(self):
+		for room_names in ([], "[]", None):
+			with self.subTest(room_names=room_names):
+				self.assertEqual(get_rooms(room_names), [])
+
+	def test_get_rooms_does_not_scale_queries_with_room_count(self):
+		small_list = [self.make_room_name("small") for _ in range(2)]
+		large_list = [self.make_room_name("large") for _ in range(8)]
+		for room_name in small_list + large_list:
+			get_room(room_name)
+			add_text(room_name, f"hello from {room_name}", sender_name="Aparna")
+
+		# Warm the meta/permission caches so the measurement is of the read path only.
+		get_rooms(small_list)
+		get_rooms(large_list)
+
+		small_list_queries = []
+		with self.collect_queries(small_list_queries):
+			get_rooms(small_list)
+
+		large_list_queries = []
+		with self.collect_queries(large_list_queries):
+			summaries = get_rooms(large_list)
+
+		self.assertEqual(len(summaries), 8)
+		self.assertEqual(
+			len(large_list_queries),
+			len(small_list_queries),
+			msg="get_rooms scales with room count:\n" + "\n\n".join(large_list_queries),
+		)
+		self.assertLessEqual(len(large_list_queries), 4, msg="\n\n".join(large_list_queries))
