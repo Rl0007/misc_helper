@@ -375,7 +375,7 @@
 	</p>
 	<form class="mt-5 flex flex-col gap-3" @submit.prevent="join()">
 		<label class="sr-only" for="name_input">{{ _("Your name") }}</label>
-		{{ text_input(placeholder=_("e.g. Hussain"), attrs='id="name_input" x-model="name_draft"') }}
+		{{ text_input(placeholder=_("e.g. John"), attrs='id="name_input" x-model="name_draft"') }}
 		{{ button(label=_("Join the room"), type="submit", classes="w-full", attrs=':disabled="!name_draft.trim()"') }}
 	</form>
 	{%- endcall -%}

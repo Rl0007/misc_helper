@@ -162,7 +162,9 @@
    bubble per file. #}
 {%- macro chat_bubble(icon) -%}
 <div
-	class="group flex items-end gap-2 rounded-radius transition"
+	{# The padding is cancelled by the matching negative margin, so the row sits exactly where it
+	   did -- it exists only so the jump-to-pin ring clears the bubble instead of tracing it. #}
+	class="group -m-1.5 flex items-end gap-2 rounded-radius p-1.5 transition"
 	:id="`item-${message.item_name}`"
 	:class="[
 		message.is_mine ? 'flex-row-reverse' : '',

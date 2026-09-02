@@ -9,7 +9,7 @@ from frappe.sessions import get_csrf_token
 # *.bundle.* files. Browsers will otherwise serve a stale copy across deploys indefinitely, and a
 # stale stylesheet is not cosmetic here: the cascade fixes live in it. BUMP THIS on any change to
 # clipboard.css, clipboard_room.js or clipboard_realtime.js.
-ASSET_VERSION = 25
+ASSET_VERSION = 26
 
 
 def add_shell_context(context) -> None:
