@@ -46,6 +46,22 @@ per-item expiry, room listing/discovery.
 not from any setting (§7.4). Chunked upload stays out: it is the only way past that ceiling and it
 is a separate build.
 
+**Amended 2026-09-01 (chat rebuild).** The room page was rebuilt against the `ephemeral-chat-mockup`
+reference, which moves three things from Out to In:
+
+- **Rich text.** Messages now carry a `text_format` of Plain, Code or Rich. Rich stores HTML,
+  which is why `Clipboard Item.content` keeps `ignore_xss_filter: 1` AND why `add_text`
+  re-sanitises server-side against a tag allowlist — the client sanitiser is a UX nicety, not a
+  trust boundary (§5 gives every guest write access).
+- **Author names.** `sender_name` is a free-text label the browser sends with each write. It is
+  *not* identity and proves nothing; `sender` (the opaque per-browser id) still decides which side
+  of the chat a bubble sits on. Anyone can claim any name — that is unchanged from §5, where the
+  room name is the only credential.
+- **A room list, for rooms you already know.** `get_rooms(room_names)` returns summaries for names
+  the caller supplies from its own local history. It is still **not** discovery: it enumerates
+  nothing, and unlike `get_room` it never creates or resurrects a room, so a stale sidebar entry
+  cannot slide a dead room's expiry.
+
 Passcode and private rooms are the intended v2. The v1 doctype carries **no** `passcode_hash`
 column — dead columns are worse than a later migration. Frappe's own login is the likely v2
 gate, since the page already runs inside a Frappe session.
@@ -212,14 +228,32 @@ website_route_rules = [{"from_route": "/clipboard/<room_name>", "to_route": "cli
 Confirmed stack. No SPA framework, no jQuery. Mobile-first. All JS `async/await` — no
 callbacks, no nested promises.
 
-### 9.1 Design tokens — use frappe-ui/espresso, define no colors
+### 9.1 Design tokens — frappe-ui/espresso (see the 2026-09-01 amendment for the room page)
 
 Frappe's website bundle **already loads the frappe-ui (espresso) token layer** on every portal
 page: `website.bundle.scss` imports `espresso/_colors.scss`, which pulls in
 `frappe/public/css/espresso/colors.css` — 1125 CSS custom properties, with a
 `[data-theme="dark"]` block already wired to Frappe's theme switching.
 
-So the page inherits light/dark for free and **must not declare a single hardcoded color**.
+So a page built on these inherits light/dark for free.
+
+**Superseded again 2026-09-01 (standalone shell).** The clipboard pages no longer extend
+`templates/base.html` and no longer load `website.bundle.css`. They render inside
+`templates/clipboard_shell.html` with their own Tailwind build (preflight included) and a
+hand-wired socket.io client (`clipboard_realtime.js`), taking the CSRF token, site name and
+socketio port from `misc_helper/clipboard/shell.py`. §9.2's premise — that the page inherits
+Frappe's bundle and must work around it — no longer holds for these two pages; every `!important`
+workaround and element reset that premise required has been deleted. Realtime, guest writes and
+the guest security model of §5 are unchanged.
+
+**Superseded 2026-09-01 (chat rebuild).** The room page now declares its own palette — the
+mockup's hexes, with a `.dark` class variant the page toggles itself from its Light/Dark/Auto
+control — because matching the reference exactly was the requirement, and because the per-user
+bubble/accent swatches recolour `--color-bubble` / `--color-primary` at runtime, which an espresso
+mapping cannot express. Consequences accepted: the room page no longer follows Frappe's
+`[data-theme]`, and dark mode is now this page's own responsibility rather than free.
+
+The table below still governs every OTHER portal page in this app.
 
 Semantic tokens to build on:
 

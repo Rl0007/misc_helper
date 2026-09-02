@@ -5,14 +5,18 @@
 	"description": "Misc day to day helper for Rahul",
 	"license": "MIT",
 	"devDependencies": {
+		"@biomejs/biome": "^2.3.14",
 		"@tailwindcss/cli": "^4.2.1",
-		"tailwindcss": "^4.2.1",
-		"@biomejs/biome": "^2.3.14"
+		"tailwindcss": "^4.2.1"
 	},
 	"scripts": {
 		"clipboard-css": "npx @tailwindcss/cli -i ./tailwind/clipboard.css -o ./misc_helper/public/css/clipboard.css --minify",
 		"clipboard-css-watch": "npx @tailwindcss/cli -i ./tailwind/clipboard.css -o ./misc_helper/public/css/clipboard.css --watch",
 		"lint": "npx @biomejs/biome check misc_helper/public/js",
 		"lint-fix": "npx @biomejs/biome check --write misc_helper/public/js"
+	},
+	"dependencies": {
+		"@dicebear/core": "^10.7.0",
+		"@dicebear/styles": "^10.6.0"
 	}
 }

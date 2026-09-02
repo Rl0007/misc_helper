@@ -5,13 +5,16 @@ import base64
 import binascii
 import re
 from datetime import datetime
+from html import unescape
 from typing import TYPE_CHECKING
 
 import frappe
+import nh3
 from frappe import _
 from frappe.core.api.file import get_max_file_size
 from frappe.rate_limiter import rate_limit
 from frappe.utils.data import add_to_date, cint, cstr, get_datetime, now_datetime
+from frappe.utils.html_utils import REMOVE_CONTENT_TAGS
 
 from misc_helper.clipboard.cleanup import delete_room
 
@@ -77,11 +80,40 @@ FILE_TYPE_FAMILIES = {
 
 FILE_TYPE_EXTENSION_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
 
-# An opaque id the browser generates for itself and stores locally. It is only ever compared
-# against itself to decide which side of the chat an item sits on -- never rendered, never treated
-# as proof of anything. Anyone can send any value; that is fine, because it grants nothing that
-# knowing the room name did not already grant (spec §5).
-SENDER_PATTERN = re.compile(r"^[a-f0-9]{16,64}$")
+# An opaque id the browser generates for itself and stores locally -- the per-browser `sender`,
+# and the `group_id` shared by files sent in one action. Both are only ever compared against
+# themselves, never rendered, never treated as proof of anything. Anyone can send any value; that
+# is fine, because it grants nothing that knowing the room name did not already grant (spec §5).
+OPAQUE_ID_PATTERN = re.compile(r"^[a-f0-9]{16,64}$")
+
+# How content is rendered. Only meaningful on a Text item; anything else falls back to Plain.
+TEXT_FORMATS = ("Plain", "Code", "Rich")
+
+# What a Rich item may keep once it reaches the server. The client sanitises too, but that is a
+# UX nicety: add_text is allow_guest + xss_safe and `content` carries ignore_xss_filter, so this
+# allowlist is the ONLY thing standing between a pasted payload and stored XSS.
+RICH_TEXT_TAGS = frozenset(
+	{"b", "strong", "i", "em", "u", "code", "pre", "a", "ul", "ol", "li", "br", "p", "div", "span"}
+)
+
+# Nothing but a link target survives, and only an absolute http(s) one -- a relative href would
+# still be same-origin, and every other scheme (javascript:, data:) is an execution vector.
+RICH_TEXT_ATTRIBUTES = {"a": {"href"}}
+RICH_TEXT_URL_SCHEMES = {"http", "https"}
+
+# A guest-supplied label is rendered by the client, so it is capped and kept to one line here.
+MAX_SENDER_NAME_LENGTH = 40
+MAX_DISPLAY_NAME_LENGTH = 60
+
+CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+
+# Sidebar summaries only. Long enough to recognise a room by, short enough that no room's content
+# meaningfully leaves the room page.
+MAX_PREVIEW_LENGTH = 80
+
+# A visitor's local sidebar is the only thing that supplies these names, so the cap is an abuse
+# ceiling rather than a product limit.
+MAX_ROOMS_PER_LOOKUP = 50
 
 # Fallbacks for when the matching Clipboard Settings field is blank or zero.
 DEFAULT_VALIDITY_HOURS = 24
@@ -98,13 +130,16 @@ ITEM_FIELDS = (
 	"name",
 	"item_type",
 	"sender",
+	"sender_name",
 	"sender_kind",
 	"is_pinned",
 	"content",
+	"text_format",
 	"file_type",
 	"file_url",
 	"file_name",
 	"file_size",
+	"group_id",
 	"creation",
 )
 
@@ -127,6 +162,7 @@ def get_room(room_name: str) -> dict:
 
 	return {
 		"room_name": room_name,
+		"display_name": room["display_name"] or room_name,
 		"expires_on": cstr(room["expires_on"]),
 		"validity_hours": get_room_validity_hours(room_name),
 		"max_validity_hours": get_max_validity_hours(settings),
@@ -137,6 +173,106 @@ def get_room(room_name: str) -> dict:
 	}
 
 
+# `list` is deliberately unparameterised: Frappe type-checks whitelisted arguments before the body
+# runs, and list[str] would reject the entire call over one null a stale local sidebar sent.
+@frappe.whitelist(allow_guest=True)
+def get_rooms(room_names: str | list | None = None) -> list[dict]:
+	"""Sidebar summaries for rooms the caller already knows the names of.
+
+	Deliberately NOT discovery: it enumerates nothing and answers only for names the visitor's own
+	local history supplied. And unlike get_room it never creates or resurrects a room -- a stale
+	entry in one visitor's sidebar would otherwise slide a dead room's expiry forward on every page
+	load and the room would never die.
+	"""
+	wanted_room_names = []
+	for room_name in frappe.parse_json(room_names) or []:
+		room_name = get_room_name(room_name)
+		# A name the sidebar kept from an older, stricter or looser scheme is skipped rather than
+		# thrown on, so one bad local entry cannot break the whole sidebar.
+		if room_name and room_name not in wanted_room_names:
+			wanted_room_names.append(room_name)
+		if len(wanted_room_names) >= MAX_ROOMS_PER_LOOKUP:
+			break
+
+	if not wanted_room_names:
+		return []
+
+	live_rooms = frappe.get_all(
+		"Clipboard",
+		filters={"name": ("in", wanted_room_names), "expires_on": (">", now_datetime())},
+		fields=["name", "display_name", "expires_on"],
+		limit_page_length=0,
+	)
+	if not live_rooms:
+		return []
+
+	summary_by_room = get_room_summaries([room.name for room in live_rooms])
+
+	return [
+		{
+			"room_name": room.name,
+			"display_name": room.display_name or room.name,
+			"expires_on": cstr(room.expires_on),
+			**summary_by_room.get(room.name, {"item_count": 0, "last_sender_name": "", "last_preview": ""}),
+		}
+		for room in live_rooms
+	]
+
+
+def get_room_summaries(room_names: list[str]) -> dict[str, dict]:
+	"""Item count and a one-line preview of the newest item, for every named room at once.
+
+	Three bounded queries, none of them per room. The first deliberately leaves `content` out: it
+	would be up to max_text_size_kb per row across every item of every room, and only the newest
+	item of each room ever reaches a preview.
+	"""
+	newest_item_by_room: dict[str, frappe._dict] = {}
+	item_count_by_room: dict[str, int] = {}
+	for item in frappe.get_all(
+		"Clipboard Item",
+		filters={"clipboard": ("in", room_names)},
+		fields=["name", "clipboard", "item_type", "text_format", "file_name", "sender_name"],
+		order_by="creation asc",
+		limit_page_length=0,
+	):
+		item_count_by_room[item.clipboard] = item_count_by_room.get(item.clipboard, 0) + 1
+		newest_item_by_room[item.clipboard] = item
+
+	preview_by_item = get_item_previews(
+		[item.name for item in newest_item_by_room.values() if item.item_type == "Text"]
+	)
+
+	return {
+		room_name: {
+			"item_count": item_count_by_room[room_name],
+			"last_sender_name": item.sender_name or "",
+			"last_preview": preview_by_item.get(item.name, get_preview(item.file_name)),
+		}
+		for room_name, item in newest_item_by_room.items()
+	}
+
+
+def get_item_previews(item_names: list[str]) -> dict[str, str]:
+	"""Previews for the handful of Text items that actually need their content read."""
+	if not item_names:
+		return {}
+
+	return {
+		item.name: get_preview(get_plain_text(item.content) if item.text_format == "Rich" else item.content)
+		for item in frappe.get_all(
+			"Clipboard Item",
+			filters={"name": ("in", item_names)},
+			fields=["name", "content", "text_format"],
+			limit_page_length=0,
+		)
+	}
+
+
+def get_preview(text: str | None) -> str:
+	"""One short line, so a sidebar row never wraps and no room's content really leaves the room."""
+	return " ".join(cstr(text).split())[:MAX_PREVIEW_LENGTH]
+
+
 # xss_safe is set ONLY here, and only because this endpoint stores text verbatim. For a Guest
 # caller, is_whitelisted (frappe/__init__.py:649) bleach-sanitises every string in form_dict before
 # the function body runs -- it entity-escapes `&` and silently DELETES tags -- which corrupts the
@@ -145,17 +281,33 @@ def get_room(room_name: str) -> dict:
 # feature's entire user base. Never interpolate `content` unescaped into a template.
 @frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
-def add_text(room_name: str, content: str, sender: str | None = None) -> dict:
+def add_text(
+	room_name: str,
+	content: str,
+	sender: str | None = None,
+	sender_name: str | None = None,
+	# str | None, not str: Frappe's typing validation raises on a null the client sends for an
+	# argument it has nothing to put in, and an absent format is exactly the Plain case.
+	text_format: str | None = "Plain",
+) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
+	text_format = get_valid_text_format(text_format)
 
 	content = cstr(content).strip()
 	if not content:
 		frappe.throw(_("Cannot add empty text."))
 
+	# The cap belongs on what the user actually sent, before sanitising shrinks it -- otherwise a
+	# megabyte of markup would pass by collapsing to a few surviving words.
 	max_text_size_kb = cint(settings.max_text_size_kb)
 	if len(content.encode()) > max_text_size_kb * 1024:
 		frappe.throw(_("Text is larger than the {0} KB limit.").format(max_text_size_kb))
+
+	if text_format == "Rich":
+		content = get_safe_rich_text(content)
+		if not content:
+			frappe.throw(_("Cannot add empty text."))
 
 	get_active_room(room_name)
 	validate_room_capacity(room_name, settings)
@@ -164,7 +316,9 @@ def add_text(room_name: str, content: str, sender: str | None = None) -> dict:
 	item.clipboard = room_name
 	item.item_type = "Text"
 	item.content = content
-	item.sender = get_valid_sender(sender)
+	item.text_format = text_format
+	item.sender = get_valid_opaque_id(sender)
+	item.sender_name = get_valid_label(sender_name, MAX_SENDER_NAME_LENGTH)
 	# The room name is the only credential this product has; §5 of the spec makes that the trust
 	# model, so the guest API authorizes and the doctype stays closed to the desk.
 	item.insert(ignore_permissions=True)
@@ -188,6 +342,8 @@ def add_file(
 	data_base64: str,
 	content: str | None = None,
 	sender: str | None = None,
+	sender_name: str | None = None,
+	group_id: str | None = None,
 ) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
@@ -205,7 +361,9 @@ def add_file(
 	item.clipboard = room_name
 	item.item_type = "Image" if file_type in IMAGE_FILE_TYPES else "File"
 	item.content = get_valid_caption(content, settings)
-	item.sender = get_valid_sender(sender)
+	item.sender = get_valid_opaque_id(sender)
+	item.sender_name = get_valid_label(sender_name, MAX_SENDER_NAME_LENGTH)
+	item.group_id = get_valid_opaque_id(group_id)
 	item.file_type = file_type
 	item.file_name = get_display_file_name(file_name, file_type)
 	item.file_size = len(file_bytes)
@@ -271,6 +429,26 @@ def set_pinned(room_name: str, item_name: str, is_pinned: bool) -> dict:
 	return {"name": item_name, "is_pinned": is_pinned}
 
 
+# xss_safe for the same reason add_text is: the title is free text, and for a Guest caller
+# is_whitelisted bleach-sanitises every string in form_dict before this body runs, which would turn
+# "R&D notes" into "R&amp;D notes". Escaping at render time is therefore the only XSS defence for
+# `display_name` -- never interpolate it unescaped into a template.
+@frappe.whitelist(allow_guest=True, xss_safe=True, methods=["POST"])
+@rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
+def set_room_display_name(room_name: str, display_name: str) -> dict:
+	"""Retitle the room. Cosmetic and shared -- room_name stays the address and the credential."""
+	room_name = get_valid_room_name(room_name)
+	display_name = get_valid_label(display_name, MAX_DISPLAY_NAME_LENGTH)
+
+	get_active_room(room_name)
+	frappe.db.set_value("Clipboard", room_name, "display_name", display_name, update_modified=False)
+	# Deliberately NOT save_write, exactly like set_pinned: renaming is not new content, so it must
+	# not slide the room's expiry. It still pings viewers so the new title appears everywhere.
+	publish_room_change(room_name)
+
+	return {"room_name": room_name, "display_name": display_name or room_name}
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(key="room_name", limit=get_writes_per_minute, seconds=60)
 def set_validity(room_name: str, validity_hours: int) -> dict:
@@ -308,16 +486,62 @@ def validate_item_belongs_to_room(room_name: str, item_name: str) -> None:
 		frappe.throw(_("This item does not belong to room {0}.").format(room_name), frappe.PermissionError)
 
 
-def get_valid_sender(sender: str | None) -> str:
-	"""Keep a well-formed browser id, drop anything else rather than throwing.
+def get_valid_opaque_id(value: str | None) -> str:
+	"""Keep a well-formed browser-generated id, drop anything else rather than throwing.
 
-	Dropping beats rejecting: the id decides only which side of the chat a bubble sits on, so a
-	client that sends nothing (or something odd) should still be able to post -- it just does not
-	get to claim a side.
+	Dropping beats rejecting: `sender` decides only which side of the chat a bubble sits on and
+	`group_id` only whether several files draw as one message, so a client that sends nothing (or
+	something odd) should still be able to post -- it just does not get the grouping.
 	"""
-	sender = cstr(sender).strip().lower()
+	value = cstr(value).strip().lower()
 
-	return sender if SENDER_PATTERN.match(sender) else ""
+	return value if OPAQUE_ID_PATTERN.match(value) else ""
+
+
+def get_valid_label(value: str | None, max_length: int) -> str:
+	"""A short single-line label typed by a guest.
+
+	Capped and stripped of control characters so it cannot smuggle newlines or terminal escapes
+	into whatever renders it. It is still untrusted free text -- escaping at render time stays
+	load-bearing, exactly as it is for `content`.
+	"""
+	value = CONTROL_CHARACTER_PATTERN.sub(" ", cstr(value))
+
+	return " ".join(value.split())[:max_length]
+
+
+def get_valid_text_format(text_format: str | None) -> str:
+	"""Fall back to Plain rather than throwing: an unknown format is a client bug, and rendering
+	the text verbatim is always the safe reading of it."""
+	text_format = cstr(text_format).strip().title()
+
+	return text_format if text_format in TEXT_FORMATS else "Plain"
+
+
+def get_safe_rich_text(content: str) -> str:
+	"""Re-sanitise client-supplied HTML against our own allowlist.
+
+	The client sanitises before sending, but that is a UX nicety and not a trust boundary: this
+	endpoint is allow_guest + xss_safe and `content` carries ignore_xss_filter, so nothing else
+	stands between a pasted payload and stored XSS.
+	"""
+	return nh3.clean(
+		content,
+		tags=set(RICH_TEXT_TAGS),
+		attributes=RICH_TEXT_ATTRIBUTES,
+		clean_content_tags=REMOVE_CONTENT_TAGS,
+		url_schemes=RICH_TEXT_URL_SCHEMES,
+		# A relative href is still same-origin, and this text is rendered to strangers.
+		url_relative="deny",
+		link_rel="noopener noreferrer",
+		set_tag_attribute_values={"a": {"target": "_blank"}},
+		strip_comments=True,
+	).strip()
+
+
+def get_plain_text(content: str) -> str:
+	"""The readable text inside Rich content. Markup must never reach a plain-text surface."""
+	return unescape(nh3.clean(cstr(content), tags=set(), clean_content_tags=REMOVE_CONTENT_TAGS))
 
 
 def get_valid_caption(content: str | None, settings: "ClipboardSettings") -> str:
@@ -332,9 +556,20 @@ def get_valid_caption(content: str | None, settings: "ClipboardSettings") -> str
 	return content
 
 
-def get_valid_room_name(room_name: str) -> str:
+def get_room_name(room_name: str) -> str:
+	"""The slugified room name, or "" when it is not a legal one.
+
+	Split out of get_valid_room_name so a caller holding a list of names (get_rooms) can drop one
+	bad entry without the throw that would fail the whole call -- same rule, one definition.
+	"""
 	room_name = cstr(room_name).strip().lower().replace(" ", "-").replace("_", "-")
-	if not ROOM_NAME_PATTERN.match(room_name):
+
+	return room_name if ROOM_NAME_PATTERN.match(room_name) else ""
+
+
+def get_valid_room_name(room_name: str) -> str:
+	valid_room_name = get_room_name(room_name)
+	if not valid_room_name:
 		frappe.throw(
 			_(
 				"Room name must be 3 to 41 characters of lowercase letters, numbers and hyphens,"
@@ -342,7 +577,7 @@ def get_valid_room_name(room_name: str) -> str:
 			)
 		)
 
-	return room_name
+	return valid_room_name
 
 
 def is_weak_name(room_name: str) -> bool:
@@ -373,10 +608,14 @@ def get_expiry(room_name: str) -> datetime:
 
 def get_active_room(room_name: str) -> dict:
 	"""Return the live room, creating it fresh if it is absent or already past its expiry."""
-	expires_on = frappe.db.get_value("Clipboard", room_name, "expires_on")
-	if expires_on:
-		if get_datetime(expires_on) > now_datetime():
-			return {"room_name": room_name, "expires_on": expires_on}
+	existing_room = frappe.db.get_value("Clipboard", room_name, ["expires_on", "display_name"], as_dict=True)
+	if existing_room:
+		if get_datetime(existing_room.expires_on) > now_datetime():
+			return {
+				"room_name": room_name,
+				"expires_on": existing_room.expires_on,
+				"display_name": existing_room.display_name,
+			}
 
 		# Expired names are reusable, and the new occupant must never see the old occupant's items.
 		delete_room(room_name)
@@ -391,7 +630,7 @@ def get_active_room(room_name: str) -> dict:
 	# of committing here -- a bare commit would also commit whatever the caller had in flight.
 	frappe.flags.commit = True
 
-	return {"room_name": room_name, "expires_on": room.expires_on}
+	return {"room_name": room_name, "expires_on": room.expires_on, "display_name": ""}
 
 
 def get_items(room_name: str) -> list[dict]:

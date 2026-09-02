@@ -1,71 +1,62 @@
-{% extends "templates/clipboard_layout.html" %}
+{% extends "templates/clipboard_shell.html" %}
 {% from "templates/macros/clipboard.html" import icon, naming_advice %}
-{% from "templates/macros/clipboard/ui.html" import button %}
+{% from "templates/macros/clipboard/ui.html" import button, text_input %}
 
 {% block title %}{{ _("Clipboard Rooms") }}{% endblock %}
 
-{% block head_include %}
-{{ super() }}
-<script defer src="/assets/misc_helper/js/alpine.min.js"></script>
-{% endblock %}
 
 {% block page_content %}
-<div class="cb-page bg-surface py-8 text-on-surface">
-	<div class="mx-auto w-full max-w-xl px-4">
-		<h1 class="m-0 text-2xl font-semibold tracking-tight text-on-surface-strong">{{ _("Clipboard rooms") }}</h1>
-		<p class="m-0 mt-2 text-sm text-on-surface/60">
-			{{ _("Say a room name out loud, type it on every device, and share text and images between them. Nothing to install.") }}
+<div class="mx-auto w-full max-w-xl px-4 py-10">
+	{# m-0 is required: preflight is deliberately not imported, so Bootstrap's own heading and
+	   list margins survive. #}
+	<h1 class="m-0 text-2xl font-bold tracking-tight text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("Clipboard rooms") }}</h1>
+	<p class="m-0 mt-2 text-sm text-on-surface dark:text-on-surface-dark">
+		{{ _("Say a room name out loud, type it on every device, and share text and files between them. Nothing to install.") }}
+	</p>
+
+	<form
+		class="mt-6 rounded-radius border border-outline bg-surface p-4 dark:border-outline-dark dark:bg-surface-dark-alt"
+		x-data="clipboard_landing"
+		@submit.prevent="open_room()"
+	>
+		<label class="block text-sm font-semibold text-on-surface-strong dark:text-on-surface-dark-strong" for="room_name_input">
+			{{ _("Enter a room name") }}
+		</label>
+		<div class="mt-2 flex flex-col gap-2 sm:flex-row">
+			{{ text_input(
+				placeholder="rahul-standup",
+				attrs='id="room_name_input" x-model="room_name" autocomplete="off" autocapitalize="off" spellcheck="false"'
+			) }}
+			{{ button(
+				label=_("Open room"),
+				type="submit",
+				icon_html=icon("arrow-right", "size-4"),
+				attrs=':disabled="!is_valid"'
+			) }}
+		</div>
+		<p class="m-0 mt-1.5 h-4 text-xs text-on-surface dark:text-on-surface-dark" x-cloak>
+			<span x-show="room_name && !is_valid">{{ _("Use 3-41 characters: letters, numbers and dashes.") }}</span>
+			<span x-show="room_name && is_valid && slug !== room_name">
+				{{ _("Opens") }}
+				<span class="font-mono text-on-surface-strong dark:text-on-surface-dark-strong">/clipboard/<span x-text="slug"></span></span>
+			</span>
 		</p>
+	</form>
 
-		<form class="mt-6 rounded-radius border border-outline bg-surface-alt p-3" x-data="clipboard_landing" @submit.prevent="open_room()">
-			<label class="block text-sm font-medium text-on-surface-strong" for="room_name_input">
-				{{ _("Enter a room name") }}
-			</label>
-			<div class="mt-2 flex flex-col gap-2 sm:flex-row">
-				<input
-					id="room_name_input"
-					x-model="room_name"
-					type="text"
-					autocomplete="off"
-					autocapitalize="off"
-					spellcheck="false"
-					placeholder="rahul-standup"
-					class="w-full rounded-radius border border-outline bg-surface px-3 py-2 text-sm text-on-surface placeholder:text-on-surface/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong"
-				>
-				{{ button(
-					label=_("Open room"),
-					type="submit",
-					classes="shrink-0",
-					attrs=':disabled="!is_valid"',
-					icon_html=icon("arrow-right")
-				) }}
-			</div>
-			<p class="m-0 mt-1.5 h-4 text-sm text-on-surface/60" x-cloak>
-				<span x-show="room_name && !is_valid">{{ _("Use 3-41 characters: letters, numbers and dashes.") }}</span>
-				<span x-show="room_name && is_valid && slug !== room_name">
-					{{ _("Opens") }} <span class="font-medium text-on-surface-strong">/clipboard/<span x-text="slug"></span></span>
-				</span>
-			</p>
-		</form>
+	<div class="mt-6">{{ naming_advice() }}</div>
 
-		<div class="mt-6">
-			{{ naming_advice() }}
-		</div>
-
-		<div class="mt-6 rounded-radius border border-outline bg-surface-alt p-4 text-sm text-on-surface">
-			<p class="m-0 font-medium text-on-surface-strong">{{ _("How it works") }}</p>
-			<ul class="m-0 mt-2 list-disc space-y-1 pl-5">
-				<li>{{ _("There is no create step — the room exists the first time someone opens it.") }}</li>
-				<li>{{ _("Paste anywhere on the room page with Ctrl+V, or type and send.") }}</li>
-				<li>{{ _("Scan the room's QR code to carry on from your phone.") }}</li>
-			</ul>
-		</div>
+	<div class="mt-6 rounded-radius border border-outline bg-surface p-4 text-sm text-on-surface dark:border-outline-dark dark:bg-surface-dark-alt dark:text-on-surface-dark">
+		<p class="m-0 font-medium text-on-surface-strong dark:text-on-surface-dark-strong">{{ _("How it works") }}</p>
+		<ul class="m-0 mt-2 list-none space-y-1 pl-0">
+			<li class="ml-4 list-disc">{{ _("There is no create step — the room exists the first time someone opens it.") }}</li>
+			<li class="ml-4 list-disc">{{ _("Paste anywhere on the room page with Ctrl+V, or type and send.") }}</li>
+			<li class="ml-4 list-disc">{{ _("Ctrl+C on the room page copies the newest item back out.") }}</li>
+		</ul>
 	</div>
 </div>
 {% endblock %}
 
-{% block script %}
-{{ super() }}
+{% block page_scripts %}
 <script>
 	document.addEventListener('alpine:init', () => {
 		Alpine.data('clipboard_landing', () => ({
@@ -84,10 +75,9 @@
 			},
 
 			open_room() {
-				if (!this.is_valid) {
-					return;
+				if (this.is_valid) {
+					window.location.href = `/clipboard/${this.slug}`;
 				}
-				window.location.href = `/clipboard/${this.slug}`;
 			},
 		}));
 	});

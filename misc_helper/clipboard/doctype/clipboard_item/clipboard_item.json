@@ -7,13 +7,16 @@
  "field_order": [
   "clipboard",
   "sender",
+  "sender_name",
   "sender_kind",
   "item_type",
   "content",
+  "text_format",
   "file_type",
   "file_url",
   "file_name",
   "file_size",
+  "group_id",
   "is_pinned"
  ],
  "fields": [
@@ -82,6 +85,27 @@
    "fieldtype": "Select",
    "label": "Sender Kind",
    "options": "Human\nAgent"
+  },
+  {
+   "description": "Display name the author typed. A label only -- anyone can claim any name, so it proves nothing and is never treated as identity.",
+   "fieldname": "sender_name",
+   "fieldtype": "Data",
+   "label": "Sender Name",
+   "length": 40
+  },
+  {
+   "default": "Plain",
+   "description": "How the page renders content. Rich stores HTML, re-sanitised server-side by api.add_text. Text items only.",
+   "fieldname": "text_format",
+   "fieldtype": "Select",
+   "label": "Text Format",
+   "options": "Plain\nCode\nRich"
+  },
+  {
+   "description": "Opaque id shared by files sent in one action, so the page draws them as a single message with one caption.",
+   "fieldname": "group_id",
+   "fieldtype": "Data",
+   "label": "Group ID"
   }
  ],
  "grid_page_length": 50,

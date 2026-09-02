@@ -49,7 +49,11 @@ use_json_request_body = True
 # browsers happily serve a stale copy across deploys. A stale stylesheet here is not a cosmetic
 # problem: the clipboard room's responsive show/hide depends on rules whose cascade order changed,
 # so an old file silently shows desktop users the mobile chrome. Bump on every CSS change.
-web_include_css = "/assets/misc_helper/css/clipboard.css?v=6"
+# clipboard.css is deliberately NOT a web_include_css hook: it imports Tailwind's preflight so
+# the clipboard pages match their design reference, and web_include_css would take those ~200
+# element resets to EVERY portal page on the site. Each clipboard template <link>s it from its
+# own head instead. Bump the ?v= in those templates on every CSS change -- a Tailwind-built
+# stylesheet gets no content hash from bundled_asset().
 # web_include_css = "/assets/misc_helper/css/misc_helper.css"
 # web_include_js = "/assets/misc_helper/js/misc_helper.js"
 

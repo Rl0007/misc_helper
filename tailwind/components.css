@@ -1,5 +1,5 @@
-/* The last hand-written CSS for the clipboard pages. Everything else is now a Penguin UI
- * derived macro built from utilities (see misc_helper/templates/macros/clipboard/ui.html).
+/* The only hand-written CSS for the clipboard pages. Everything else is utilities on macros
+ * (see misc_helper/templates/macros/clipboard/ui.html).
  *
  * Imported by clipboard.css BEFORE tailwindcss/utilities.css, and that order is load-bearing:
  * these must stay UNLAYERED to beat Frappe's own unlayered bundle, but emitting them after the
@@ -7,44 +7,75 @@
  * position where both hold.
  */
 
-/* Scopes InterVariable (already self-hosted by Frappe's website bundle -- no extra font request)
- * to just the clipboard pages, not the site body: web_include_css loads on every portal page, so
- * a bare `body` font rule here would repaint the whole site. */
+/* Alpine's own cloak rule. Frappe's bundle has none, and the attribute alone styles nothing. */
+[x-cloak] {
+	display: none !important;
+}
+
+/* The reference declares no font-family at all, so it renders in the platform's system stack;
+ * InterVariable's wider metrics made every string visibly larger at identical px sizes and
+ * truncated room names the reference fits whole. Scoped to .cb-page, not `body`: web_include_css
+ * loads on every portal page, so a bare element rule here would repaint the whole site.
+ *
+ * The same scoping is why the reset below is written `:where(.cb-page) button` rather than
+ * `.cb-page button`. Preflight is not imported, so the UA's `border: 2px outset buttonborder`,
+ * its own font and its black ink all survive on every <button> -- which drew a bordered box
+ * around every sidebar room row, the rail toggles and the theme button. `:where()` contributes
+ * ZERO specificity, so this lands at element level (0,0,1) and any `border-*` / `text-*` utility
+ * still beats it -- which the Share-link outline and the dashed "+" tile depend on. Written as
+ * `.cb-page button` it would be (0,1,1) and would silently erase those borders instead.
+ *
+ * `font: inherit` is part of the same reset for a second reason: a <button> and a <textarea> do
+ * not inherit font-family from the page at all without it, so the composer was rendering in the
+ * UA font rather than .cb-page's. */
+/* Scopes the page font to the clipboard pages only. Preflight sets this on `html` from Tailwind's
+ * own --default-font-family; naming it here keeps the stack identical to the design reference,
+ * which declares no font-family at all and therefore renders in the system stack. */
 .cb-page {
-	font-family: InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
+	font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-/* DiceBear returns a flat SVG, so the life has to come from CSS. Kept to a single short pop on
- * mount plus a hover lift -- an avatar that animates continuously next to live-updating text is
- * a distraction, not a delight. */
-.cb-avatar {
-	animation: cb-avatar-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-	transition: transform 150ms ease;
+/* Rich text, in the bubble that renders it and in the contenteditable that composes it.
+ *
+ * Preflight strips the Bootstrap defaults but deliberately leaves lists and links UNSTYLED, so
+ * rich content needs its own presentation put back: a list with no marker and no indent, and a
+ * link with no underline, are wrong here. A `.cb-rich <element>` selector is used rather than the
+ * equivalent Tailwind arbitrary variants (`[&_a]:underline`), which emit a single class and would
+ * lose to anything at element-plus-class specificity. */
+.cb-rich a {
+	color: inherit;
+	text-decoration: underline;
 }
 
-.cb-avatar:hover {
-	transform: translateY(-2px) scale(1.06);
+.cb-rich p {
+	margin: 0;
 }
 
-@keyframes cb-avatar-pop {
-	from {
-		opacity: 0;
-		transform: scale(0.6);
-	}
-	to {
-		opacity: 1;
-		transform: scale(1);
-	}
+.cb-rich ul,
+.cb-rich ol {
+	margin: 0;
+	padding-left: 1.25rem;
 }
 
-/* Respect the OS setting -- this one is a genuine accessibility preference, unlike colour
- * scheme, which Frappe owns through [data-theme]. */
-@media (prefers-reduced-motion: reduce) {
-	.cb-avatar {
-		animation: none;
-	}
+.cb-rich li {
+	list-style: disc;
+}
 
-	.cb-avatar:hover {
-		transform: none;
-	}
+.cb-rich ol li {
+	list-style: decimal;
+}
+
+.cb-rich code,
+.cb-rich pre {
+	color: inherit;
+	background-color: rgb(0 0 0 / 0.1);
+	border-radius: 0.25rem;
+	padding: 0 0.25rem;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.75rem;
+}
+
+.dark .cb-rich code,
+.dark .cb-rich pre {
+	background-color: rgb(255 255 255 / 0.1);
 }

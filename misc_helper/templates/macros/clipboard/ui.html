@@ -1,170 +1,227 @@
 {# Clipboard UI components.
    =========================================================================================
-   Markup adapted from Penguin UI (MIT, Copyright (c) Salar Houshvand) --
-   https://github.com/SalarHoushvand/penguinui-components. See NOTICE at the repo root.
+   Every class here is the ephemeral-chat reference's own, on this page's own colour tokens
+   (see tailwind/clipboard.css) with the `dark:` variants kept -- dark mode on these pages is
+   the page's own `.dark` class on <html>, driven by its Light/Dark/Auto control, not Frappe's
+   [data-theme].
 
-   Two systematic changes were made to every component taken from there, and both matter:
+   These pages do NOT load Frappe's website.bundle.css -- they render inside
+   templates/clipboard_shell.html, which is a standalone document (see the comment at the top of
+   that file for why). That removes, permanently, the three things every macro here used to have
+   to carry:
 
-   1. EVERY `dark:` VARIANT IS STRIPPED. Penguin UI writes each colour twice because Tailwind's
-      `dark:` follows prefers-color-scheme. Frappe stamps [data-theme="dark"] on the root instead,
-      and the espresso variables behind these token names already swap underneath us. Keeping
-      `dark:` would make the page follow the OS and ignore the user's chosen Frappe theme.
+     - `!` on bare palette names, to beat Bootstrap's `.bg-primary`/`.text-danger` !important
+     - `bg-transparent` on every <button>, to beat the UA's `buttonface` grey
+     - `m-0` / `list-none pl-0` / `text-inherit` on bare `h1`/`p`/`ul`/`pre`
 
-   2. HARDCODED PALETTE CLASSES ARE REPLACED BY SEMANTIC ONES. Penguin UI's alert, for instance,
-      ships `border-sky-500 text-sky-500`; that is a literal colour with no dark-mode counterpart
-      here, so it becomes `border-info text-on-info`.
-
-   Preflight is deliberately not imported (it would strip Frappe's chrome), so Bootstrap's own
-   element styles survive and every macro below carries its own resets -- `m-0` on headings, `p`
-   and `pre`, `list-none pl-0` on lists. Dropping one does not look broken locally; it looks
-   broken only on a page that also loads Frappe's bundle, which is every page in production.
+   Tailwind's preflight is imported instead and handles all of it. Write plain utilities here.
+   If a colour or a margin ever mysteriously refuses to apply again, the first thing to check is
+   whether something put that bundle back on the page.
    ========================================================================================= #}
+
+{# Avatars are DiceBear, rendered locally by the ESM import in the page head with the public
+   api.dicebear.com URL as the fallback. The seed is a person's display name (falling back to
+   their opaque sender id), so the same person draws the same face for everyone in the room. #}
+{%- macro avatar(src_expr, classes="size-8 rounded-full", alt_expr="''", attrs="") -%}
+<img
+	class="shrink-0 bg-surface-alt object-cover dark:bg-surface-dark {{ classes }}"
+	:src="{{ src_expr }}"
+	:alt="{{ alt_expr }}"
+	{{ attrs | safe }}
+>
+{%- endmacro -%}
 
 {%- macro button(label="", variant="primary", type="button", classes="", attrs="", icon_html="") -%}
 {%- set palette = {
-	"primary": "bg-primary! border-primary! text-on-primary focus-visible:outline-primary",
-	"secondary": "bg-surface-alt border-outline text-on-surface-strong focus-visible:outline-outline-strong",
-	"ghost": "bg-transparent border-transparent text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
-	"danger": "bg-danger! border-danger! text-on-danger focus-visible:outline-danger"
+	"primary": "bg-primary text-on-primary hover:opacity-90 disabled:opacity-40",
+	"outline": "border border-outline text-on-surface-strong hover:bg-surface-alt dark:border-outline-dark dark:text-on-surface-dark-strong dark:hover:bg-surface-dark"
 } -%}
 <button
 	type="{{ type }}"
-	class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-radius border px-4 py-2 text-sm font-medium tracking-wide transition hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 active:opacity-100 active:outline-offset-0 disabled:cursor-not-allowed disabled:opacity-50 {{ palette[variant] }} {{ classes }}"
+	class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-radius px-4 py-2 text-sm font-semibold whitespace-nowrap transition {{ palette[variant] }} {{ classes }}"
 	{{ attrs | safe }}
->{{ icon_html | safe }}{{ label }}{{ caller() if caller is defined and caller else "" }}</button>
+>{{ icon_html | safe }}{{ label }}</button>
 {%- endmacro -%}
 
-{%- macro icon_button(icon_html, label, classes="", attrs="", variant="ghost") -%}
-{%- set palette = {
-	"ghost": "border-transparent text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
-	"secondary": "border-outline bg-surface text-on-surface hover:bg-surface-alt focus-visible:outline-outline-strong",
-	"danger": "border-transparent text-on-danger hover:bg-danger focus-visible:outline-danger"
-} -%}
+{# Square, quiet, icon-only. The label is screen-reader text, never a tooltip substitute. #}
+{%- macro icon_button(icon_html, label, classes="p-2", attrs="") -%}
 <button
 	type="button"
-	class="inline-flex size-8 shrink-0 items-center justify-center rounded-radius border transition hover:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 {{ palette[variant] }} {{ classes }}"
+	class="inline-flex shrink-0 items-center justify-center rounded-radius text-on-surface transition hover:bg-surface-alt hover:text-on-surface-strong dark:text-on-surface-dark dark:hover:bg-surface-dark dark:hover:text-on-surface-dark-strong {{ classes }}"
+	title="{{ label }}"
 	{{ attrs | safe }}
 >{{ icon_html | safe }}<span class="sr-only">{{ label }}</span></button>
 {%- endmacro -%}
 
-{# Avatar. The seed is the opaque sender id, so the same browser always draws the same face
-   without anything about it being stored or displayed. Agents get a visibly different style
-   (robots) so a message from a model is never mistaken for a person's. #}
-{%- macro avatar(seed_expr, kind_expr="'human'", classes="size-8") -%}
-<img
-	class="shrink-0 rounded-full border border-outline bg-surface-alt object-cover cb-avatar {{ classes }}"
-	alt=""
-	loading="lazy"
-	:src="avatar_url({{ seed_expr }}, {{ kind_expr }})"
+{%- macro text_input(classes="", attrs="", placeholder="", type="text") -%}
+<input
+	type="{{ type }}"
+	placeholder="{{ placeholder }}"
+	class="w-full rounded-radius border border-outline bg-surface-alt px-3 py-2 text-sm text-on-surface-strong placeholder:text-on-surface/60 focus:border-primary focus:outline-none dark:border-outline-dark dark:bg-surface-dark dark:text-on-surface-dark-strong {{ classes }}"
+	{{ attrs | safe }}
 >
-{%- endmacro -%}
-
-{%- macro chip(body, classes="") -%}
-<span class="inline-flex items-center gap-1.5 rounded-radius border border-outline bg-surface-alt px-2 py-0.5 text-xs font-medium text-on-surface {{ classes }}">{{ body | safe }}</span>
-{%- endmacro -%}
-
-{%- macro alert(tone="danger", classes="", attrs="") -%}
-{%- set palette = {
-	"danger": "border-danger! bg-danger/40 text-on-danger",
-	"warning": "border-warning! bg-warning/40 text-on-warning",
-	"info": "border-info! bg-info/40 text-on-info"
-} -%}
-<div role="alert" class="flex w-full items-start gap-2 overflow-hidden rounded-radius border p-3 text-sm {{ palette[tone] }} {{ classes }}" {{ attrs | safe }}>
-	{{ caller() }}
-</div>
 {%- endmacro -%}
 
 {%- macro select(classes="", attrs="") -%}
 <select
-	class="appearance-none rounded-radius border border-outline bg-surface-alt px-2 py-1 text-xs text-on-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong disabled:cursor-not-allowed disabled:opacity-75 {{ classes }}"
+	class="w-full appearance-none rounded-radius border border-outline bg-surface-alt px-2 py-1.5 text-xs text-on-surface-strong focus:border-primary focus:outline-none dark:border-outline-dark dark:bg-surface-dark dark:text-on-surface-dark-strong {{ classes }}"
 	{{ attrs | safe }}
 >{{ caller() }}</select>
 {%- endmacro -%}
 
-{%- macro textarea(id, placeholder_expr, classes="", attrs="") -%}
-<textarea
-	id="{{ id }}"
-	rows="1"
-	:placeholder="{{ placeholder_expr }}"
-	class="w-full resize-none rounded-radius border border-outline bg-surface-alt px-3 py-2 text-sm text-on-surface placeholder:text-on-surface/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-outline-strong {{ classes }}"
-	{{ attrs | safe }}
-></textarea>
+{# One button in the rich-text toolbar. document.execCommand is the only API a contenteditable
+   toolbar has short of shipping an editor library, so `command` is passed straight to it. #}
+{%- macro rich_tool(command, label, body) -%}
+<button
+	type="button"
+	class="rounded-radius px-2 py-1 text-xs font-semibold text-on-surface transition hover:bg-surface-alt hover:text-on-surface-strong dark:text-on-surface-dark dark:hover:bg-surface-dark dark:hover:text-on-surface-dark-strong"
+	title="{{ label }}"
+	@click="set_rich_format('{{ command }}')"
+>{{ body | safe }}</button>
 {%- endmacro -%}
 
-{# Chat bubble, from Penguin UI's chat-bubble-with-avatar. Mine sits right on `primary`,
-   everyone else's sits left on `surface-alt`, and the asymmetric corner radii are what make it
-   read as a conversation rather than a list of cards.
+{# Centred dialog on a scrim. `state` is the Alpine expression that owns open/closed; pass
+   attrs='@click.self="..."' for a dismissable backdrop. #}
+{%- macro modal(state, classes="", attrs="") -%}
+<div x-show="{{ state }}" x-cloak class="fixed inset-0 z-60 flex items-center justify-center bg-black/60 px-4" {{ attrs | safe }}>
+	<div class="w-full max-w-sm rounded-radius border border-outline bg-surface p-6 dark:border-outline-dark dark:bg-surface-dark-alt {{ classes }}">
+		{{ caller() }}
+	</div>
+</div>
+{%- endmacro -%}
 
-   The action row inherits the bubble's own ink rather than the page's, because on a `primary`
-   bubble the page ink would be invisible. #}
-{%- macro chat_bubble(icon) -%}
-<div class="flex items-end gap-2" :class="is_mine(item) ? 'flex-row-reverse' : 'flex-row'">
-	{{ avatar("item.sender", "item.sender_kind") }}
-	<div
-		class="flex min-w-0 max-w-[85%] flex-col gap-2 p-3 md:max-w-[70%]"
-		:class="is_mine(item)
-			? 'ml-auto rounded-l-radius rounded-tr-radius bg-primary! text-on-primary'
-			: 'mr-auto rounded-r-radius rounded-tl-radius bg-surface-alt text-on-surface'"
+{# One palette row. `state` holds the chosen swatch name, `action` is the setter to call.
+   :style is unavoidable here: the fill is a runtime hex from PALETTE, not a design token. #}
+{%- macro swatch_grid(label, state, action) -%}
+<p class="m-0 pb-1.5 text-[10px] font-semibold tracking-wider text-on-surface/70 uppercase dark:text-on-surface-dark/70">{{ label }}</p>
+<div class="flex flex-wrap gap-1.5 pb-3">
+	<template x-for="swatch in palette" :key="swatch.name">
+		<button
+			type="button"
+			class="size-6 rounded-full border transition"
+			:style="`background-color:${swatch.value}`"
+			:title="swatch.label"
+			:aria-label="swatch.label"
+			:class="{{ state }} === swatch.name
+				? 'border-on-surface-strong ring-2 ring-on-surface-strong/30 dark:border-on-surface-dark-strong dark:ring-on-surface-dark-strong/30'
+				: 'border-outline dark:border-outline-dark'"
+			@click="{{ action }}(swatch.name)"
+		></button>
+	</template>
+</div>
+{%- endmacro -%}
+
+{# One room in the expanded sidebar list. #}
+{%- macro room_row() -%}
+<button
+	type="button"
+	class="flex w-full items-center gap-3 rounded-radius px-2 py-2 text-left transition"
+	:class="room.room_name === room_name
+		? 'bg-primary/10 text-on-surface-strong dark:text-on-surface-dark-strong'
+		: 'hover:bg-surface-alt dark:hover:bg-surface-dark'"
+	@click="open_room(room.room_name)"
+>
+	{{ avatar("room_avatar_url(room)", "size-9 rounded-radius", "room.display_name") }}
+	<span class="min-w-0 flex-1">
+		<span class="flex items-center gap-2">
+			<span class="truncate text-sm font-semibold text-on-surface-strong dark:text-on-surface-dark-strong" x-text="room.display_name"></span>
+			<span x-show="is_unread(room)" x-cloak class="size-1.5 shrink-0 rounded-full bg-danger"></span>
+		</span>
+		<span class="block truncate text-xs text-on-surface dark:text-on-surface-dark" x-text="room_preview(room)"></span>
+	</span>
+	<span class="shrink-0 font-mono text-[10px] text-on-surface/70 dark:text-on-surface-dark/70" x-text="room_time_left(room)"></span>
+</button>
+{%- endmacro -%}
+
+{# One attachment inside a bubble. Images open the lightbox, video plays inline, and anything
+   else -- the backend accepts fourteen file types, the reference only ever showed images --
+   gets a download card that inherits the bubble's own ink. #}
+{%- macro attachment(icon) -%}
+<template x-if="is_image(file)">
+	<button type="button" class="overflow-hidden rounded-radius border border-black/10" @click="lightbox = file">
+		<img :src="file.file_url" :alt="file.file_name" loading="lazy" class="max-h-64 w-full object-cover" @load="on_media_load()">
+	</button>
+</template>
+<template x-if="is_video(file)">
+	<video controls preload="metadata" class="max-h-64 w-full rounded-radius border border-black/10" :src="file.file_url" @loadedmetadata="on_media_load()"></video>
+</template>
+<template x-if="!is_image(file) && !is_video(file)">
+	<a
+		class="flex max-w-full items-center gap-2 rounded-radius border border-current/25 px-3 py-2 text-sm text-inherit no-underline hover:text-inherit"
+		:href="file.file_url"
+		:download="file.file_name"
 	>
-		<template x-if="item.item_type === 'Image'">
-			<a :href="item.file_url" target="_blank" rel="noopener">
-				<img :src="item.file_url" :alt="item.file_name" loading="lazy" class="max-h-64 rounded-radius" @load="on_media_load()">
-			</a>
-		</template>
-		<template x-if="item.item_type === 'File' && is_video(item)">
-			<video controls preload="metadata" class="max-h-64 w-full rounded-radius" :src="item.file_url" @loadedmetadata="on_media_load()"></video>
-		</template>
-		<template x-if="item.item_type === 'File' && !is_video(item)">
-			<a
-				class="inline-flex max-w-full items-center gap-2 rounded-radius border border-current/25 px-3 py-2 text-sm text-inherit no-underline hover:text-inherit"
-				:href="item.file_url"
-				download
-			>
-				{{ icon("download", "w-3.5 h-3.5 shrink-0") }}
-				<span class="truncate" x-text="item.file_name"></span>
-			</a>
-		</template>
+		{{ icon("download", "size-3.5 shrink-0") }}
+		<span class="truncate" x-text="file.file_name"></span>
+	</a>
+</template>
+{%- endmacro -%}
 
-		{# x-text, never x-html: add_text and add_file are xss_safe, so nothing bleaches this on
-		   the way in and escaping here is the only remaining XSS defence. #}
-		<template x-if="item.content">
-			<pre class="m-0 max-h-64 overflow-auto bg-transparent font-mono text-sm break-words whitespace-pre-wrap text-inherit" x-text="item.content"></pre>
-		</template>
-
-		<div class="flex items-center justify-between gap-2 text-xs opacity-75">
-			<span class="flex min-w-0 items-center gap-1 truncate">
-				<span x-show="Number(item.is_pinned)" x-cloak>{{ icon("pin", "w-3 h-3 shrink-0") }}</span>
-				<span class="truncate" x-text="format_item_meta(item)"></span>
+{# One message. A "message" is one text item, or every file item that shared a group_id in a
+   single send -- the reference draws a multi-file send as one bubble with a grid, not as one
+   bubble per file. #}
+{%- macro chat_bubble(icon) -%}
+<div class="group flex items-end gap-2" :class="message.is_mine ? 'flex-row-reverse' : ''">
+	{{ avatar("sender_avatar_url(message)", "size-8 rounded-full", "message.sender_name") }}
+	<div class="min-w-0 max-w-xl">
+		<div class="mb-1 flex items-center gap-2 px-1" :class="message.is_mine ? 'flex-row-reverse' : ''">
+			<span class="text-xs font-semibold text-on-surface-strong dark:text-on-surface-dark-strong" x-text="message.sender_name"></span>
+			<span class="font-mono text-[10px] text-on-surface/70 dark:text-on-surface-dark/70" x-text="clock(message.creation)"></span>
+			<span class="text-on-surface/70 dark:text-on-surface-dark/70" x-show="message.is_pinned" x-cloak>
+				{{ icon("pin", "size-3") }}
+				<span class="sr-only">{{ _("Pinned") }}</span>
 			</span>
-			<div class="flex shrink-0 items-center gap-0.5">
-				<button
-					type="button"
-					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
-					:class="Number(item.is_pinned) ? 'bg-current/15' : ''"
-					@click="toggle_pin(item)"
-				>
-					{{ icon("pin", "w-3.5 h-3.5") }}
-					<span class="sr-only">{{ _("Pin") }}</span>
-				</button>
-				<button
-					type="button"
-					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
-					@click="copy_item(item)"
-				>
-					<span x-show="copied_item_name !== item.name">{{ icon("copy", "w-3.5 h-3.5") }}</span>
-					<span x-show="copied_item_name === item.name" x-cloak>{{ icon("check", "w-3.5 h-3.5") }}</span>
-					<span class="sr-only">{{ _("Copy") }}</span>
-				</button>
-				<button
-					type="button"
-					class="inline-flex size-7 items-center justify-center rounded-radius transition hover:bg-current/15"
-					@click="delete_item(item)"
-				>
-					{{ icon("trash", "w-3.5 h-3.5") }}
-					<span class="sr-only">{{ _("Delete") }}</span>
-				</button>
+		</div>
+		<div
+			class="rounded-radius px-3 py-2 text-sm"
+			:class="message.is_mine
+				? 'bg-bubble text-on-bubble'
+				: 'bg-surface text-on-surface-strong dark:bg-surface-dark-alt dark:text-on-surface-dark-strong'"
+		>
+			{# x-text for Plain and Code: add_text is xss_safe, so nothing bleaches the content on
+			   the way in and escaping here is the only remaining XSS defence. x-html is reached
+			   ONLY by Rich, which the server re-sanitises to an allow-list before storing. #}
+			<pre x-show="message.text_format === 'Code'" class="m-0 overflow-x-auto p-0 font-mono text-xs whitespace-pre text-inherit" x-text="message.content"></pre>
+			<p x-show="message.text_format === 'Plain' && message.content" class="m-0 break-words whitespace-pre-wrap" x-text="message.content"></p>
+			<template x-if="message.text_format === 'Rich'">
+				<div x-html="message.content" class="cb-rich break-words"></div>
+			</template>
+
+			<div
+				x-show="message.files.length"
+				class="mt-2 grid gap-2"
+				:class="message.files.length > 1 ? 'grid-cols-2' : 'grid-cols-1'"
+			>
+				<template x-for="file in message.files" :key="file.name">
+					<div>{{ attachment(icon) }}</div>
+				</template>
 			</div>
 		</div>
+	</div>
+
+	{# Hidden until the row is hovered, exactly as the reference's lone copy button was. #}
+	{# Hidden below md, and `md:flex` rather than `md:flex` because Frappe's bundle ships
+	   `.hidden { display: none !important }`. Three 32px buttons per row are a quarter of a
+	   360px screen, and a touch device has no hover to reveal them with anyway. #}
+	<div class="mb-1 hidden shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 md:flex">
+		{{ icon_button(
+			'<span x-show="copied_item_name !== message.item_name">' ~ icon("copy", "size-4") ~ '</span><span x-show="copied_item_name === message.item_name" x-cloak>' ~ icon("check", "size-4") ~ '</span>',
+			_("Copy message"),
+			classes="p-1.5",
+			attrs='@click="copy_message(message)"'
+		) }}
+		{{ icon_button(
+			icon("pin", "size-4"),
+			_("Pin message"),
+			classes="p-1.5",
+			attrs='@click="toggle_pin(message)" :class="message.is_pinned ? \'bg-surface-alt dark:bg-surface-dark\' : \'\'"'
+		) }}
+		{{ icon_button(
+			icon("trash", "size-4"),
+			_("Delete message"),
+			classes="p-1.5 hover:text-danger",
+			attrs='@click="delete_message(message)"'
+		) }}
 	</div>
 </div>
 {%- endmacro -%}

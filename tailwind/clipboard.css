@@ -2,113 +2,75 @@
  *
  * Preflight is deliberately NOT imported: these pages render inside Frappe's website
  * bundle (Bootstrap + espresso components), and Tailwind's reset would strip the
- * surrounding navbar/footer styling.
+ * surrounding navbar/footer styling. Every macro therefore carries its own element
+ * resets (`m-0` on headings/p/pre, `list-none pl-0` on lists, `text-inherit` on pre/a).
  *
  * The utilities are imported unlayered for the same reason. Frappe's bundle is unlayered,
  * and unlayered rules beat any @layer regardless of source order, so `@layer utilities`
  * would silently lose every collision with frappe's own .inline-flex / .hidden helpers.
  *
- * Every color below maps onto a frappe-ui (espresso) token that the website bundle
- * already ships on every portal page, so dark mode follows [data-theme="dark"] for
- * free. `@theme inline` is required for that: it substitutes the var() reference into
- * the utility instead of freezing a resolved value at :root. */
-
-/* ---------------------------------------------------------------------------------------------
- * PenguinUI token bridge.
+ * COLOURS ARE THIS PAGE'S OWN, not frappe-ui/espresso tokens, and dark mode is this page's
+ * own `.dark` class on <html> rather than Frappe's [data-theme]. The clipboard room ships a
+ * Light/Dark/Auto control of its own and a user-chosen bubble/accent colour, neither of which
+ * espresso can express; mapping onto espresso would hand both decisions back to the site theme.
+ * `--color-primary`, `--color-on-primary`, `--color-bubble` and `--color-on-bubble` are
+ * overwritten at runtime on documentElement from the palette picker, which is why these stay in
+ * a plain `@theme` (utilities keep the var() indirection) and not `@theme inline`.
  *
- * PenguinUI components (MIT, Salar Houshvand -- see NOTICE) are written against a fixed set of
- * semantic colour names. Defining those names here, backed by frappe-ui/espresso variables, lets
- * their markup be pasted essentially verbatim while every colour still comes from Frappe.
- *
- * THE `dark:` CLASSES MUST BE STRIPPED FROM PASTED MARKUP. PenguinUI writes every colour twice
- * (`bg-surface-alt dark:bg-surface-dark-alt`) because Tailwind's `dark:` variant follows
- * prefers-color-scheme. Frappe does not: it stamps [data-theme="dark"] on the root, and espresso
- * already swaps these variables underneath us. Keeping `dark:` would make the page follow the OS
- * and ignore the user's chosen Frappe theme.
- *
- * Each `-dark` name is therefore aliased to the SAME espresso variable as its light twin, so a
- * `dark:` class that survives a paste is a harmless no-op rather than a wrong colour.
- *
- * One deliberate divergence: PenguinUI treats danger/success/warning/info as SOLID fills with
- * on-* text over them. Espresso ships tinted alert surfaces with a strong ink instead, and those
- * tints are what make dark mode free here, so the mapping keeps espresso's convention.
- * ------------------------------------------------------------------------------------------- */
-@theme inline {
-	--color-surface: var(--surface-base);
-	--color-surface-alt: var(--surface-gray-2);
-	--color-surface-dark: var(--surface-base);
-	--color-surface-dark-alt: var(--surface-gray-2);
+ * BARE `bg-primary` / `text-primary` / `border-primary` / `bg-danger` / `text-danger` / the
+ * `-secondary` trio ARE UNUSABLE HERE. Frappe's website.bundle.css ships Bootstrap's contextual
+ * utilities under exactly those names as hardcoded colours with !important, and they win with no
+ * error in the class list. Always write them with Tailwind's important modifier (`bg-primary!`);
+ * web_include_css is injected after the bundle, so source order then decides in our favour.
+ * Slash-opacity variants (`bg-primary/10`) and `on-*` names generate different classes and are
+ * safe as-is. */
 
-	--color-on-surface: var(--ink-gray-8);
-	--color-on-surface-strong: var(--ink-gray-9);
-	--color-on-surface-dark: var(--ink-gray-8);
-	--color-on-surface-dark-strong: var(--ink-gray-9);
+@custom-variant dark (&:where(.dark, .dark *));
 
-	--color-outline: var(--outline-gray-2);
-	--color-outline-strong: var(--outline-gray-3);
-	--color-outline-dark: var(--outline-gray-2);
-	--color-outline-dark-strong: var(--outline-gray-3);
-
-	/* gray-8, not gray-7: gray-7 is #7c7c7c in light, and white on it is ~3.5:1 -- under WCAG AA
-	   for body text. gray-8 (#525252 light / #afafaf dark) clears 7:1 against --ink-base in both
-	   themes, which matters because whole pasted messages are read inside a primary bubble. */
-	--color-primary: var(--surface-gray-8);
-	--color-on-primary: var(--ink-base);
-	--color-primary-dark: var(--surface-gray-8);
-	--color-on-primary-dark: var(--ink-base);
-
-	--color-secondary: var(--surface-gray-2);
-	--color-on-secondary: var(--ink-gray-8);
-	--color-secondary-dark: var(--surface-gray-2);
-	--color-on-secondary-dark: var(--ink-gray-8);
-
-	--color-danger: var(--surface-red-2);
-	--color-on-danger: var(--ink-red-8);
-	--color-danger-dark: var(--surface-red-2);
-	--color-on-danger-dark: var(--ink-red-8);
-
-	--color-success: var(--surface-green-2);
-	--color-on-success: var(--ink-green-8);
-	--color-success-dark: var(--surface-green-2);
-	--color-on-success-dark: var(--ink-green-8);
-
-	--color-warning: var(--surface-amber-2);
-	--color-on-warning: var(--ink-amber-8);
-	--color-warning-dark: var(--surface-amber-2);
-	--color-on-warning-dark: var(--ink-amber-8);
-
-	--color-info: var(--surface-blue-2);
-	--color-on-info: var(--ink-blue-8);
-	--color-info-dark: var(--surface-blue-2);
-	--color-on-info-dark: var(--ink-blue-8);
-}
-
-/* PenguinUI's single radius token, matched to the card radius this app already uses. */
 @theme {
-	--radius-radius: 0.75rem;
+	--color-surface: #ffffff;
+	--color-surface-alt: #f7f7f8;
+	--color-on-surface: #4b5563;
+	--color-on-surface-strong: #0b0b0d;
+	--color-surface-dark: #0f1012;
+	--color-surface-dark-alt: #17181c;
+	--color-on-surface-dark: #a1a1aa;
+	--color-on-surface-dark-strong: #fafafa;
+	--color-primary: #475569;
+	--color-on-primary: #ffffff;
+	--color-bubble: #475569;
+	--color-on-bubble: #ffffff;
+	--color-secondary: #14b8a6;
+	--color-outline: #e4e4e7;
+	--color-outline-dark: #2a2b31;
+	--color-danger: #e11d48;
+	--radius-radius: 0.5rem;
 }
 
-/* Static tokens (not var() indirections onto espresso vars, so plain @theme, not
-   @theme inline): frappe-ui's own subtle multi-layer shadow scale and its 10px
-   field radius, ported verbatim so this page reads like an actual frappe-ui surface
-   instead of flat 1px borders. */
-@theme {
-	--shadow-cb-xs: 0px 1px 2px rgba(0, 0, 0, 0.08);
-	--shadow-cb-sm: 0px 0px 1px rgba(0, 0, 0, 0.3), 0px 1px 2px rgba(0, 0, 0, 0.1);
-	--shadow-cb-md: 0px 0px 1px rgba(0, 0, 0, 0.12), 0px 0.5px 2px rgba(0, 0, 0, 0.15), 0px 2px 3px rgba(0, 0, 0, 0.16);
-	--radius-cb-field: 0.625rem;
-	--radius-cb-card: 0.75rem;
-}
+/* components.css must be emitted BEFORE the utilities and stay unlayered: unlayered is what
+   makes it beat Frappe's own unlayered Bootstrap rules, and "before" is what stops it beating
+   responsive utilities like `md:hidden` on source order. It is the only position where both
+   hold. */
 
-/* Every .cb-* component below lives in @layer components, and that is load-bearing.
-   Layered rules lose to unlayered ones, and the utilities above are unlayered, so this is
-   what makes `md:hidden` actually beat `.cb-icon-btn { display: inline-flex }` -- without
-   it the component wins on source order and responsive display utilities silently do
-   nothing. Frappe's own bundle is unlayered too, but it has no .cb-* rules to collide with. */
-
+/* Preflight IS imported here, unlike everywhere else in this app, and that is the whole reason this
+ * page can match its reference. The mockup was authored against `@import "tailwindcss"`, which
+ * includes preflight -- ~200 element resets. Without them every bare <button>, <img>, <p>, <ul> and
+ * <label> falls through to Bootstrap's rules from Frappe's website bundle, and each one shifts
+ * spacing by a few pixels. Re-deriving those resets by hand is whack-a-mole: you fix the button
+ * border, then the image is inline, then <p> has line-height 1.7, then <label> has a 0.5rem bottom
+ * margin, and the page stays subtly wrong the whole way.
+ *
+ * The usual objection -- "preflight strips Frappe's navbar and footer" -- does not apply, because
+ * both clipboard pages blank {% block navbar %} and {% block footer %}: there is no chrome to strip.
+ *
+ * The real constraint was `web_include_css`, which loads on EVERY portal page and would have taken
+ * preflight site-wide. So this stylesheet is no longer a web_include_css hook; each clipboard
+ * template <link>s it from its own head instead. Keep it that way -- putting this file back on
+ * web_include_css would reset every other portal page on the site. */
 @import "tailwindcss/theme.css";
+@import "tailwindcss/preflight.css";
 @import "./components.css";
 @import "tailwindcss/utilities.css";
 
-@source "../misc_helper/www/clipboard";
-@source "../misc_helper/templates/macros";
+@source "../misc_helper/www";
+@source "../misc_helper/templates";

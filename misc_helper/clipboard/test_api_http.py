@@ -1,6 +1,8 @@
 # Copyright (c) 2026, rl0007 and Contributors
 # See license.txt
 
+import json
+
 import frappe
 from frappe.tests.test_api import make_request
 from frappe.utils import get_test_client
@@ -51,6 +53,50 @@ class TestGuestHttpRoundTrip(ClipboardTestBase):
 		self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
 		return response.json["message"]
+
+	def test_rich_content_is_sanitised_on_the_way_in(self):
+		"""xss_safe lifts the guest form_dict sanitiser for this endpoint, so the allowlist in
+		add_text is the only thing left. This drives the same path a real browser does."""
+		room_name = self.make_room_name("http")
+
+		response = self.post_method(
+			"misc_helper.clipboard.api.add_text",
+			{
+				"room_name": room_name,
+				"content": '<b>keep</b><script>alert(1)</script><a href="javascript:alert(1)">x</a>',
+				"text_format": "Rich",
+			},
+		)
+		self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+		stored = response.json["message"]["content"]
+		self.assertIn("<b>keep</b>", stored)
+		self.assertNotIn("script", stored)
+		self.assertNotIn("javascript", stored)
+
+	def test_guest_display_name_survives_the_round_trip(self):
+		"""set_room_display_name is xss_safe for the same reason add_text is: without it a guest's
+		"R&D notes" would arrive entity-escaped."""
+		room_name = self.make_room_name("http")
+
+		response = self.post_method(
+			"misc_helper.clipboard.api.set_room_display_name",
+			{"room_name": room_name, "display_name": "R&D <notes>"},
+		)
+		self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+		self.assertEqual(response.json["message"]["display_name"], "R&D <notes>")
+
+	def test_get_rooms_is_reachable_over_get_and_omits_an_unknown_room(self):
+		room_name = self.make_room_name("http")
+
+		response = self.get_method(
+			"misc_helper.clipboard.api.get_rooms", {"room_names": json.dumps([room_name])}
+		)
+
+		self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+		self.assertEqual(response.json["message"], [])
+		frappe.db.rollback()
+		self.assertFalse(frappe.db.exists("Clipboard", room_name))
 
 	def test_request_is_really_a_guest(self):
 		"""If this ever authenticates, every assertion in this class becomes worthless: the
