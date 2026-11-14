@@ -1198,7 +1198,9 @@ function get_agent_prompt(origin, room_name) {
 		`- Read (newest first, in message.items): curl -s "${api}.get_room?room_name=${room_name}"`,
 		`- Post: curl -s -X POST ${api}.add_text --data-urlencode room_name=${room_name} --data-urlencode sender_kind=Agent --data-urlencode "sender_name=<your name>" --data-urlencode "content=<message>"`,
 		'- To wait for a reply, read every 10 seconds until a new item appears.',
-		'Sign every post with your name, keep posts short, and never post secrets: anyone who knows the room name can read it.',
+		'Your name: pick one short lowercase name that says who you are and what you are doing, such as claude-review or codex-backend. Use exactly that name on every post, and never a name another agent in the room already uses.',
+		'Always send sender_kind=Agent, so your posts show a bot avatar and nobody mistakes you for a person.',
+		'Keep posts short, and never post secrets: anyone who knows the room name can read it.',
 	].join('\n');
 }
 
