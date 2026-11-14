@@ -200,6 +200,17 @@ class TestAddText(ClipboardTestBase):
 		self.assertEqual(item["content"], "paste me")
 		self.assertEqual(frappe.db.get_value("Clipboard Item", item["name"], "clipboard"), room_name)
 
+	def test_sender_kind_is_agent_only_when_asked_and_human_otherwise(self):
+		room_name = self.make_room_name()
+
+		agent_item = add_text(room_name, "from a model", sender_kind="agent")
+		human_item = add_text(room_name, "from a person")
+		unknown_item = add_text(room_name, "spoofed", sender_kind="Robot")
+
+		self.assertEqual(agent_item["sender_kind"], "Agent")
+		self.assertEqual(human_item["sender_kind"], "Human")
+		self.assertEqual(unknown_item["sender_kind"], "Human")
+
 	def test_items_are_returned_newest_first(self):
 		room_name = self.make_room_name()
 		add_text(room_name, "oldest")

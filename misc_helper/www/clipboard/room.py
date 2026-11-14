@@ -59,6 +59,7 @@ def get_labels() -> dict:
 		"message_copied": _("Message copied"),
 		"file_link_copied": _("Link copied — paste it anywhere to share this file"),
 		"link_copied": _("Link copied — anyone with it can join"),
+		"agent_prompt_copied": _("Agent prompt copied — paste it into your agent"),
 		"copy_blocked": _("Your browser blocked the copy. Select the text and copy it manually."),
 		"room_created": _("Room created — share the link"),
 		"request_failed": _("That did not go through. Please try again."),

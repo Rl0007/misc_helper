@@ -298,6 +298,7 @@ def add_text(
 	# str | None, not str: Frappe's typing validation raises on a null the client sends for an
 	# argument it has nothing to put in, and an absent format is exactly the Plain case.
 	text_format: str | None = "Plain",
+	sender_kind: str | None = None,
 ) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
@@ -328,6 +329,7 @@ def add_text(
 	item.text_format = text_format
 	item.sender = get_valid_opaque_id(sender)
 	item.sender_name = get_valid_label(sender_name, MAX_SENDER_NAME_LENGTH)
+	item.sender_kind = get_valid_sender_kind(sender_kind)
 	# The room name is the only credential this product has; §5 of the spec makes that the trust
 	# model, so the guest API authorizes and the doctype stays closed to the desk.
 	item.insert(ignore_permissions=True)
@@ -354,6 +356,7 @@ def add_file(
 	sender: str | None = None,
 	sender_name: str | None = None,
 	group_id: str | None = None,
+	sender_kind: str | None = None,
 ) -> dict:
 	room_name = get_valid_room_name(room_name)
 	settings = get_settings()
@@ -373,6 +376,7 @@ def add_file(
 	item.content = get_valid_caption(content, settings)
 	item.sender = get_valid_opaque_id(sender)
 	item.sender_name = get_valid_label(sender_name, MAX_SENDER_NAME_LENGTH)
+	item.sender_kind = get_valid_sender_kind(sender_kind)
 	item.group_id = get_valid_opaque_id(group_id)
 	item.file_type = file_type
 	item.file_name = get_display_file_name(file_name, file_type)
@@ -522,6 +526,10 @@ def get_valid_label(value: str | None, max_length: int) -> str:
 	value = CONTROL_CHARACTER_PATTERN.sub(" ", cstr(value))
 
 	return " ".join(value.split())[:max_length]
+
+
+def get_valid_sender_kind(sender_kind: str | None) -> str:
+	return "Agent" if cstr(sender_kind).strip().lower() == "agent" else "Human"
 
 
 def get_valid_text_format(text_format: str | None) -> str:

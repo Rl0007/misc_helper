@@ -176,6 +176,13 @@
 						attrs='@click="share_link()"'
 					) }}
 
+					{{ button(
+						variant="outline",
+						classes="px-2.5 py-1.5 text-xs",
+						icon_html=icon("bot", "size-3.5") ~ '<span class="hidden sm:inline">' ~ _("Agent prompt") ~ '</span>',
+						attrs='@click="copy_agent_prompt()" title="' ~ _("Copy a prompt that lets an AI agent read and post in this room") ~ '"'
+					) }}
+
 					<span class="mx-1 hidden h-6 w-px bg-outline md:block dark:bg-outline-dark"></span>
 
 					{# All three icons are in the DOM and shown by state, rather than an x-html

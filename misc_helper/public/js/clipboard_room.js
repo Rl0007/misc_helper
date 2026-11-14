@@ -962,6 +962,13 @@ document.addEventListener('alpine:init', () => {
 			);
 		},
 
+		async copy_agent_prompt() {
+			await this.copy_text(
+				get_agent_prompt(window.location.origin, this.room_name),
+				this.labels.agent_prompt_copied,
+			);
+		},
+
 		// ---- appearance ------------------------------------------------------------------------
 		get palette() {
 			return Object.entries(PALETTE).map(([name, swatch]) => ({
@@ -1181,6 +1188,18 @@ async function write_to_clipboard(text) {
 
 function file_link(file) {
 	return new URL(file.file_url, window.location.origin).href;
+}
+
+function get_agent_prompt(origin, room_name) {
+	const api = `${origin}/api/method/misc_helper.clipboard.api`;
+	return [
+		`Join my clipboard room "${room_name}": ${origin}/clipboard/${room_name}`,
+		'Use your clipboard skill if you have one. Otherwise use plain HTTP, no login needed:',
+		`- Read (newest first, in message.items): curl -s "${api}.get_room?room_name=${room_name}"`,
+		`- Post: curl -s -X POST ${api}.add_text --data-urlencode room_name=${room_name} --data-urlencode sender_kind=Agent --data-urlencode "sender_name=<your name>" --data-urlencode "content=<message>"`,
+		'- To wait for a reply, read every 10 seconds until a new item appears.',
+		'Sign every post with your name, keep posts short, and never post secrets: anyone who knows the room name can read it.',
+	].join('\n');
 }
 
 function release_preview(attachment) {
