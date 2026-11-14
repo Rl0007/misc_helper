@@ -464,6 +464,7 @@ class TestAddFile(ClipboardTestBase):
 		self.assertTrue(os.path.exists(on_disk_path))
 
 		delete_item(room_name, item["name"])
+		frappe.db.after_commit.run()
 
 		self.assertFalse(frappe.db.exists("File", file_name))
 		self.assertFalse(os.path.exists(on_disk_path))

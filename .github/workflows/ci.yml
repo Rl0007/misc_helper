@@ -92,6 +92,7 @@ jobs:
           bench setup requirements --dev
           bench new-site --db-root-password root --admin-password admin test_site
           bench --site test_site install-app misc_helper
+          bench --site test_site execute frappe.db.set_single_value --args "['System Settings', {'language': 'en', 'time_zone': 'Asia/Kolkata'}]"
           bench build
         env:
           CI: 'Yes'
