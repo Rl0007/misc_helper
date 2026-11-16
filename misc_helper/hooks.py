@@ -198,6 +198,9 @@ website_route_rules = [{"from_route": "/clipboard/<room_name>", "to_route": "cli
 # Scheduled Tasks
 # ---------------
 
+# Slash commands that Raven may run. Raven only calls handlers listed here.
+raven_slash_command_handlers = ["misc_helper.devbox.slash_command.handle"]
+
 scheduler_events = {
 	"daily": [
 		"misc_helper.clipboard.cleanup.delete_expired_rooms",
