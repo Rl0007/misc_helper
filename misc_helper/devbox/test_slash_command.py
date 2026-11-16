@@ -7,8 +7,8 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import UnitTestCase
 
-from misc_helper.devbox import slash_command
-from misc_helper.devbox.slash_command import handle, parse_arguments
+from misc_helper.devbox import boxes_site
+from misc_helper.devbox.slash_command import get_typed_request, handle
 
 SITE = "https://boxes.test"
 ALLOWED_USER = "rahul@example.com"
@@ -35,56 +35,53 @@ STOPPED_BOX = {
 }
 
 
-class FakeBoxesSite:
-	"""Stands in for the boxes site: answers reads from fixed data and records every write."""
+class FakeBoxesSiteClient:
+	writes: list
 
-	def __init__(self):
-		self.writes = []
+	def __init__(self, url: str, api_key: str | None = None, api_secret: str | None = None):
+		self.url = url
 
-	def get(self, url: str, **kwargs) -> dict:
-		path = url.removeprefix(SITE)
-		if path == "/api/resource/Dev Box":
-			return {"data": [ACTIVE_BOX, STOPPED_BOX]}
-		if path.startswith("/api/resource/Dev Box/"):
-			return {"data": {"name": path.rsplit("/", 1)[1]}}
-		if path == "/api/resource/DevBox Template":
-			return {"data": [{"name": "Frappe v16"}, {"name": "Frappe Develop"}]}
-		if path == "/api/resource/DevBox Profile":
-			return {
-				"data": [
-					{"name": "buzz", "app_name": "buzz", "branch": None, "devbox_template": "Frappe v16"}
-				]
-			}
-		if path == "/api/method/frappe.client.get_password":
-			return {"message": "s3cret"}
-		raise AssertionError(f"unexpected GET {path}")
+	def get_list(self, doctype: str, **kwargs) -> list[dict]:
+		return {
+			"Dev Box": [ACTIVE_BOX, STOPPED_BOX],
+			"DevBox Template": [{"name": "Frappe v16"}, {"name": "Frappe Develop"}],
+			"DevBox Profile": [
+				{"name": "buzz", "app_name": "buzz", "branch": None, "devbox_template": "Frappe v16"}
+			],
+		}[doctype]
 
-	def post(self, url: str, **kwargs) -> dict:
-		path = url.removeprefix(SITE)
-		payload = kwargs.get("json") or {}
-		if path == "/api/method/run_doc_method" and payload.get("method") == "fetch_stats":
-			return {"message": {"cpu_usage": "3%", "memory_usage": "2.1 GB"}}
-		self.writes.append((path, payload))
-		if path == "/api/resource/Dev Box":
-			return {"data": {"name": "new00001"}}
-		if path == "/api/method/benchspace.api.agent_box.provision_from_profile":
-			return {"message": {"name": "prov0001"}}
-		return {}
+	def get_doc(self, doctype: str, name: str) -> dict:
+		return {"name": name}
 
-	def put(self, url: str, **kwargs) -> dict:
-		self.writes.append((url.removeprefix(SITE), kwargs.get("json") or {}))
-		return {}
+	def get_api(self, method: str, params: dict) -> str:
+		return "s3cret"
+
+	def insert(self, doc: dict) -> dict:
+		self.writes.append(("insert", doc))
+		return frappe._dict(name="new00001")
+
+	def update(self, doc: dict) -> None:
+		self.writes.append(("update", doc))
+
+	def post_api(self, method: str, params: dict) -> dict:
+		if params.get("method") == "fetch_stats":
+			return {"cpu_usage": "3%", "memory_usage": "2.1 GB"}
+		self.writes.append((method, params))
+		return {"name": "prov0001"}
 
 
-class TestParseArguments(UnitTestCase):
+class TestGetTypedRequest(UnitTestCase):
 	def test_bare_command_opens_the_menu(self):
-		self.assertEqual(parse_arguments("")["command"], "menu")
+		self.assertEqual(get_typed_request("").command, "menu")
 
 	def test_command_text_and_options_are_separated(self):
-		parsed = parse_arguments("new Frappe v16 --title my box --server fc-01")
-		self.assertEqual(parsed["command"], "new")
-		self.assertEqual(parsed["rest"], "Frappe v16")
-		self.assertEqual(parsed["options"], {"title": "my box", "server": "fc-01"})
+		request = get_typed_request("new Frappe v16 --title my box --server fc-01")
+		self.assertEqual((request.command, request.text), ("new", "Frappe v16"))
+		self.assertEqual(request.options, {"title": "my box", "server": "fc-01"})
+
+	def test_delete_with_confirm_becomes_the_confirmed_command(self):
+		request = get_typed_request("delete My Box confirm")
+		self.assertEqual((request.command, request.text), ("delete_confirmed", "My Box"))
 
 
 class TestDevboxSlashCommand(UnitTestCase):
@@ -100,15 +97,10 @@ class TestDevboxSlashCommand(UnitTestCase):
 		}
 		self.addCleanup(frappe.conf.__setitem__, "devbox_command", previous_settings)
 
-		self.boxes_site = FakeBoxesSite()
-		for request_function, fake in (
-			("make_get_request", self.boxes_site.get),
-			("make_post_request", self.boxes_site.post),
-			("make_put_request", self.boxes_site.put),
-		):
-			patcher = patch.object(slash_command, request_function, side_effect=fake)
-			patcher.start()
-			self.addCleanup(patcher.stop)
+		self.writes = FakeBoxesSiteClient.writes = []
+		patcher = patch.object(boxes_site, "BoxesSiteClient", FakeBoxesSiteClient)
+		patcher.start()
+		self.addCleanup(patcher.stop)
 
 	def send(self, arguments: str = "", pressed: str | None = None, user: str = ALLOWED_USER) -> dict:
 		return handle(SimpleNamespace(user=user, arguments=arguments, pressed=pressed, state={}))
@@ -116,10 +108,10 @@ class TestDevboxSlashCommand(UnitTestCase):
 	def button_values(self, reply: dict) -> list[str]:
 		return [button["value"] for button in reply.get("buttons", [])]
 
-	def test_other_users_are_refused_before_anything_is_fetched(self):
-		reply = self.send("list", user="stranger@example.com")
-		self.assertIn("not allowed", reply["text"])
-		slash_command.make_get_request.assert_not_called()
+	def test_other_users_are_refused(self):
+		with self.assertRaises(frappe.ValidationError) as raised:
+			self.send("list", user="stranger@example.com")
+		self.assertIn("not allowed", str(raised.exception))
 
 	def test_missing_settings_are_named(self):
 		frappe.conf["devbox_command"] = {"site": SITE}
@@ -128,18 +120,13 @@ class TestDevboxSlashCommand(UnitTestCase):
 		self.assertIn("api_key", str(raised.exception))
 
 	def test_bare_command_shows_the_menu_buttons(self):
-		reply = self.send("")
-		self.assertEqual(self.button_values(reply), ["list", "new", "provision", "templates", "help"])
+		self.assertEqual(self.button_values(self.send("")), ["list", "new", "provision", "templates", "help"])
 
-	def test_typed_list_shows_boxes_without_buttons(self):
+	def test_list_shows_each_box_with_a_button(self):
 		reply = self.send("list")
 		self.assertIn("**abc12345** · My Box · active · 8 GB", reply["text"])
 		self.assertIn("[site](https://abc12345.boxes.test)", reply["text"])
 		self.assertIn("protected", reply["text"])
-		self.assertNotIn("buttons", reply)
-
-	def test_list_button_offers_each_box(self):
-		reply = self.send(pressed="list")
 		self.assertEqual(self.button_values(reply), ["info:abc12345", "info:xyz98765", "menu"])
 
 	def test_box_buttons_match_the_box_state(self):
@@ -150,76 +137,91 @@ class TestDevboxSlashCommand(UnitTestCase):
 		self.assertIn("start:xyz98765", stopped)
 		self.assertIn("unprotect:xyz98765", stopped)
 
-	def test_info_shows_live_usage_for_a_running_box(self):
+	def test_info_finds_a_box_by_title_and_shows_live_usage(self):
 		self.assertIn("cpu 3%, memory 2.1 GB", self.send("info My Box")["text"])
 
-	def test_new_button_lists_templates_then_creates_the_box(self):
+	def test_new_offers_templates_then_creates_the_box(self):
 		self.assertEqual(
 			self.button_values(self.send(pressed="new")), ["new:Frappe v16", "new:Frappe Develop", "menu"]
 		)
 
 		reply = self.send(pressed="new:Frappe Develop")
-		path, payload = self.boxes_site.writes[0]
-		self.assertEqual(path, "/api/resource/Dev Box")
-		self.assertEqual(payload["devbox_template"], "Frappe Develop")
-		self.assertEqual(payload["server"], "Prod-01")
-		self.assertEqual(payload["owner_user"], "owner@example.com")
+		action, box = self.writes[0]
+		self.assertEqual(action, "insert")
+		self.assertEqual(
+			(box["devbox_template"], box["server"], box["owner_user"]),
+			("Frappe Develop", "Prod-01", "owner@example.com"),
+		)
 		self.assertIn("info:new00001", self.button_values(reply))
 
 	def test_typed_new_passes_title_and_server(self):
 		self.send("new Frappe v16 --title scratch --server fc-01")
-		payload = self.boxes_site.writes[0][1]
-		self.assertEqual((payload["title"], payload["server"]), ("scratch", "fc-01"))
+		box = self.writes[0][1]
+		self.assertEqual((box["title"], box["server"]), ("scratch", "fc-01"))
 
 	def test_provision_passes_the_branch(self):
 		self.send("provision buzz --branch develop")
-		path, payload = self.boxes_site.writes[0]
-		self.assertEqual(path, "/api/method/benchspace.api.agent_box.provision_from_profile")
-		self.assertEqual((payload["profile"], payload["branch"]), ("buzz", "develop"))
+		method, arguments = self.writes[0]
+		self.assertEqual(method, "benchspace.api.agent_box.provision_from_profile")
+		self.assertEqual((arguments["profile"], arguments["branch"]), ("buzz", "develop"))
 
-	def test_typed_delete_needs_the_word_confirm(self):
+	def test_delete_asks_first(self):
 		reply = self.send("delete abc12345")
-		self.assertIn("/devbox delete abc12345 confirm", reply["text"])
-		self.assertEqual(self.boxes_site.writes, [])
-
-		self.send("delete abc12345 confirm")
-		self.assertEqual(self.boxes_site.writes[0][1]["method"], "delete_box")
-
-	def test_delete_button_asks_first(self):
-		reply = self.send(pressed="delete:abc12345")
 		self.assertEqual(self.button_values(reply), ["delete_confirmed:abc12345", "info:abc12345"])
-		self.assertEqual(self.boxes_site.writes, [])
+		self.assertEqual(self.writes, [])
 
-		self.send(pressed="delete_confirmed:abc12345")
+	def test_delete_goes_ahead_once_confirmed(self):
+		self.send("delete abc12345 confirm")
+		self.send(pressed="delete_confirmed:xyz98765")
 		self.assertEqual(
-			self.boxes_site.writes[0][1], {"dt": "Dev Box", "dn": "abc12345", "method": "delete_box"}
+			[arguments for _method, arguments in self.writes],
+			[
+				{"dt": "Dev Box", "dn": "abc12345", "method": "delete_box"},
+				{"dt": "Dev Box", "dn": "xyz98765", "method": "delete_box"},
+			],
 		)
 
 	def test_protect_updates_the_box(self):
-		self.send("protect abc12345")
+		reply = self.send("protect abc12345")
 		self.assertEqual(
-			self.boxes_site.writes[0], ("/api/resource/Dev Box/abc12345", {"prevent_deletion": 1})
+			self.writes[0], ("update", {"doctype": "Dev Box", "name": "abc12345", "prevent_deletion": 1})
 		)
+		self.assertIn("unprotect:abc12345", self.button_values(reply))
 
 	def test_resize_sends_only_the_given_sizes(self):
 		self.send("resize abc12345 --memory 16")
-		self.assertEqual(self.boxes_site.writes[0][1]["args"], '{"memory_gb": 16}')
-		self.assertIn("--memory", self.send("resize abc12345")["text"])
+		self.assertEqual(self.writes[0][1]["args"], {"memory_gb": 16})
+
+	def test_resize_needs_a_size(self):
+		with self.assertRaises(frappe.ValidationError) as raised:
+			self.send("resize abc12345")
+		self.assertIn("--memory", str(raised.exception))
 
 	def test_rename_needs_a_title(self):
-		self.assertIn("Usage", self.send("rename abc12345")["text"])
+		with self.assertRaises(frappe.ValidationError):
+			self.send("rename abc12345")
 		self.send("rename abc12345 Fresh Name")
-		self.assertEqual(self.boxes_site.writes[0][1]["args"], '{"title": "Fresh Name"}')
+		self.assertEqual(self.writes[0][1]["args"], {"title": "Fresh Name"})
 
 	def test_unknown_box_and_unknown_command_explain_themselves(self):
-		self.assertIn("No box nope", self.send("info nope")["text"])
-		self.assertIn("Unknown command", self.send("frappe")["text"])
+		with self.assertRaises(frappe.ValidationError) as unknown_box:
+			self.send("info nope")
+		self.assertIn("No box nope", str(unknown_box.exception))
+		with self.assertRaises(frappe.ValidationError) as unknown_command:
+			self.send("frappe")
+		self.assertIn("Unknown command", str(unknown_command.exception))
 
-	def test_a_failed_request_shows_the_server_message(self):
+
+class TestBoxesSiteClient(UnitTestCase):
+	def test_a_failed_request_shows_the_message_from_the_boxes_site(self):
 		response = SimpleNamespace(
-			json=lambda: {"_server_messages": '["{\\"message\\": \\"<b>No capacity</b>\\"}"]'}
+			reason="Expectation Failed",
+			json=lambda: {
+				"exc_type": "ValidationError",
+				"_server_messages": '["{\\"message\\": \\"<b>No capacity</b> on Prod-01\\"}"]',
+			},
 		)
-		error = Exception("500 Server Error")
-		error.response = response
-		with patch.object(slash_command, "make_post_request", side_effect=error):
-			self.assertEqual(self.send("start abc12345")["text"], "Failed: No capacity")
+		client = boxes_site.BoxesSiteClient(SITE, api_key="key", api_secret="secret")
+		with self.assertRaises(frappe.ValidationError) as raised:
+			client.post_process(response)
+		self.assertEqual(str(raised.exception), "Failed: No capacity on Prod-01")
