@@ -247,7 +247,8 @@ def format_box(box: dict) -> str:
 	if box.get("prevent_deletion"):
 		details.append("protected")
 	links = [f"[{label}]({box[fieldname]})" for fieldname, label in BOX_LINKS.items() if box.get(fieldname)]
-	return "  \n".join(filter(None, [" · ".join(details), " · ".join(links)]))
+	lines = [" · ".join(details), " · ".join(links)]
+	return "  \n".join(line for line in lines if line)
 
 
 def format_box_details(box: dict, provisioning: dict, usage: dict) -> str:
@@ -268,7 +269,8 @@ def format_box_details(box: dict, provisioning: dict, usage: dict) -> str:
 		for key in ("cpu_usage", "memory_usage", "disk_usage")
 		if usage.get(key)
 	]
-	return "  \n".join(filter(None, [*lines, ", ".join(usage_parts)]))
+	lines.append(", ".join(usage_parts))
+	return "  \n".join(line for line in lines if line)
 
 
 def format_profiles(profiles: list[dict]) -> str:
